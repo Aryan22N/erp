@@ -63,6 +63,7 @@ model ProjectProgress {
   user_id    Int
   created_at DateTime @default(now())
 
+  @@index([project_id, created_at])
   @@map("project_progress")
 }
 
@@ -102,6 +103,10 @@ model PaymentRequest {
   created_at   DateTime      @default(now())
   updated_at   DateTime      @updatedAt
 
+  @@index([status, created_at])
+  @@index([project_id, status])
+  @@index([supervisor_id, status])
+  @@index([pm_id, status])
   @@map("payment_requests")
 }
 
@@ -187,6 +192,7 @@ model Site {
   supervisors User[]       @relation("SupervisorSite")
   attendances Attendance[]
 
+  @@index([name])
   @@map("sites")
 }
 

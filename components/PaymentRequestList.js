@@ -40,7 +40,7 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
     const [expandedNotes, setExpandedNotes] = useState({}); // { requestId: boolean }
     const [pmNotes, setPmNotes] = useState({}); // { requestId: string }
     const [savingNote, setSavingNote] = useState({}); // { requestId: boolean }
-    const [selectedRequest, setSelectedRequest] = useState(null); // Request to show in modal
+    const [selectedRequest, setSelectedRequest] = useState(null); // { request, groupKey } to show in modal
     const [budgetDialog, setBudgetDialog] = useState(null); // { pendingArgs, budgetData }
     const [expandedGroups, setExpandedGroups] = useState({}); // { [groupKey]: boolean } - default collapsed
     const [visibleCounts, setVisibleCounts] = useState({}); // { [groupKey]: number } - default 10
@@ -100,8 +100,7 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
         } catch (err) {
             console.error(err);
         } finally {
-            // Add a small delay so the user can actually see the beautiful shimmer effect
-            setTimeout(() => setLoading(false), 800);
+            setLoading(false);
         }
     };
 
@@ -211,7 +210,7 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
                         if (req.isClubbed && req.subRequests) {
                             const updatedSubReqs = req.subRequests.filter(s => s.id !== id);
                             if (updatedSubReqs.length === 0) return null; // Remove group completely if empty
-                            
+
                             return {
                                 ...req,
                                 subRequests: updatedSubReqs,
@@ -253,6 +252,63 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
         const [id, action, isClubbed, requestIds, projectId, currentPct, isSubRequest] = budgetDialog.pendingArgs;
         setBudgetDialog(null);
         await handleAction(id, action, isClubbed, requestIds, projectId, currentPct, isSubRequest, true);
+    };
+
+    // Handle approve/reject fired from inside the ExpenseDetailModal
+    const handleModalAction = async (sub, groupKey, action, progressPct) => {
+        await handleAction(sub.id, action, false, [], sub.project_id, progressPct, true);
+        // Close modal after action (success or failure — handleAction shows a toast either way)
+        setSelectedRequest(null);
+        // Also sync loadedSubRequests so the accordion body reflects the change immediately
+        setLoadedSubRequests(prev => ({
+            ...prev,
+            [groupKey]: (prev[groupKey] || []).filter(s => s.id !== sub.id)
+        }));
+    };
+
+    // Handle partial (per-material) approval from inside the ExpenseDetailModal
+    const handlePartialApprove = async (requestId, approvedMaterialIds, rejectedMaterialIds) => {
+        try {
+            const res = await fetch(`/api/payment-requests/${requestId}/approve-partial`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ approvedMaterialIds, rejectedMaterialIds })
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                const action = data.action;
+
+                if (action === "full_approve") {
+                    addToast("Request Approved ✓", "All items have been approved.", "success");
+                } else if (action === "full_reject") {
+                    addToast("Request Rejected ✗", "All items have been rejected.", "error");
+                } else if (action === "partial_with_pending") {
+                    const pendingCount = (selectedRequest?.request?.materials?.length || 0) - approvedMaterialIds.length - rejectedMaterialIds.length;
+                    addToast(
+                        "Decision Submitted ✓",
+                        `${approvedMaterialIds.length} approved, ${rejectedMaterialIds.length} rejected, ${pendingCount} kept pending for later.`,
+                        "success"
+                    );
+                } else {
+                    addToast(
+                        "Decision Submitted ✓",
+                        `${approvedMaterialIds.length} item(s) approved, ${rejectedMaterialIds.length} item(s) rejected.`,
+                        "success"
+                    );
+                }
+
+                // Refresh the list
+                setTimeout(() => fetchRequests(), 800);
+            } else {
+                addToast("Action Failed", "Something went wrong while processing the request.", "error");
+                throw new Error("API error");
+            }
+        } catch (err) {
+            console.error("Partial approve error:", err);
+            addToast("Network Error", "Unable to connect to the server.", "error");
+            throw err;
+        }
     };
 
     const getStatusColor = (status) => {
@@ -317,7 +373,7 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
 
     const handleDeleteRequest = async (id) => {
         if (!confirm("Are you sure you want to delete this expense request?")) return;
-        
+
         try {
             const res = await fetch(`/api/payment-requests/${id}`, {
                 method: "DELETE"
@@ -335,11 +391,11 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
     };
 
     let filteredRequests = requests;
-    
+
     if (selectedProjectId && (role === "SUPER_ADMIN" || role === "MANAGER_OWN_REQUESTS" || (showFilter && role === "SUPERVISOR"))) {
         filteredRequests = filteredRequests.filter(req => req.project_id === selectedProjectId);
     }
-    
+
     if (role === "SUPER_ADMIN" && statusFilter !== "ALL") {
         filteredRequests = filteredRequests.filter(req => req.status === statusFilter);
     }
@@ -551,11 +607,30 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
                                                             }}
                                                         >
                                                             <div>
-                                                                <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--text-primary)" }}>
-                                                                    Requested by: {sub.supervisor?.name || "Self"}
+                                                                <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--text-primary)", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                                                    <span>Requested by: {sub.supervisor?.name || "Self"}</span>
+                                                                    <span
+                                                                        className="role-badge"
+                                                                        style={{
+                                                                            background: `${getStatusColor(sub.status)}20`,
+                                                                            color: getStatusColor(sub.status),
+                                                                            border: `1px solid ${getStatusColor(sub.status)}30`,
+                                                                            fontSize: "11px",
+                                                                            fontWeight: 700,
+                                                                            padding: "2px 8px"
+                                                                        }}
+                                                                    >
+                                                                        {sub.status === "PENDING_ADMIN" ? "PENDING ADMIN" : sub.status === "PENDING_PM" ? "PENDING PM" : sub.status.replace("_", " ")}
+                                                                    </span>
                                                                 </div>
-                                                                <div style={{ fontSize: "13px", color: "var(--text-muted)", marginTop: "2px" }}>
-                                                                    Amount: <strong style={{ color: "var(--text-primary)" }}>₹{parseFloat(sub.total_amount).toLocaleString()}</strong>
+                                                                <div style={{ fontSize: "13px", color: "var(--text-muted)", marginTop: "4px" }}>
+                                                                    Amount: <strong style={{ color: (sub.status === "REJECTED" || (role === "SUPER_ADMIN" && sub.status === "PENDING_PM")) ? "#94a3b8" : "var(--text-primary)", textDecoration: sub.status === "REJECTED" ? "line-through" : "none" }}>₹{parseFloat(sub.total_amount).toLocaleString()}</strong>
+                                                                    {sub.status === "REJECTED" && (
+                                                                        <span style={{ color: "#ef4444", marginLeft: "6px", fontSize: "12px", fontWeight: 600 }}>(Excluded from Total)</span>
+                                                                    )}
+                                                                    {role === "SUPER_ADMIN" && sub.status === "PENDING_PM" && (
+                                                                        <span style={{ color: "#f59e0b", marginLeft: "6px", fontSize: "12px", fontWeight: 600 }}>(Pending Manager - Excluded from Total)</span>
+                                                                    )}
                                                                 </div>
                                                             </div>
 
@@ -564,21 +639,21 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
                                                                     type="button"
                                                                     className="btn-ghost"
                                                                     style={{ padding: "6px 14px", fontSize: "12px", border: "1px solid var(--border)" }}
-                                                                    onClick={() => setSelectedRequest(sub)}
+                                                                    onClick={() => setSelectedRequest({ request: sub, groupKey: reqKey, progressPct: req.progress?.percentage || 0 })}
                                                                 >
                                                                     📄 View Details
                                                                 </button>
 
                                                                 {((role === "SUPERVISOR" && sub.status === "PENDING_PM") || (role === "MANAGER_OWN_REQUESTS" && (sub.status === "PENDING_ADMIN" || sub.status === "PENDING_PM"))) && !req.isClubbed && (
                                                                     <>
-                                                                        <Link 
+                                                                        <Link
                                                                             href={`/${role === "SUPERVISOR" ? "supervisor" : "manager"}/dashboard/edit-expense/${sub.id}`}
                                                                             className="btn-ghost"
                                                                             style={{ padding: "6px 14px", fontSize: "12px", border: "1px solid var(--primary)", color: "var(--primary)", textDecoration: "none", display: "inline-block" }}
                                                                         >
                                                                             ✏️ Edit
                                                                         </Link>
-                                                                        <button 
+                                                                        <button
                                                                             className="btn-ghost"
                                                                             style={{ padding: "6px 14px", fontSize: "12px", border: "1px solid #fecaca", color: "#ef4444", background: "#fef2f2" }}
                                                                             onClick={() => handleDeleteRequest(sub.id)}
@@ -665,28 +740,36 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
                                                 </span>
                                             </div>
 
-                                            <div style={{ display: "flex", gap: "8px" }}>
-                                                {(role === "PROJECT_MANAGER" && req.status === "PENDING_PM") || (role === "SUPER_ADMIN" && req.status === "PENDING_ADMIN") ? (
-                                                    <>
-                                                        <button
-                                                            className="btn-ghost"
-                                                            onClick={() => handleAction(reqKey, "reject", req.isClubbed, req.requestIds, req.project_id, req.progress?.percentage || 0)}
-                                                            style={{ color: "#64748b", padding: "8px 16px", fontSize: "13px", border: "1px solid var(--border)" }}
-                                                            disabled={actionInProgress === reqKey}
-                                                        >
-                                                            {actionInProgress === reqKey ? "Processing..." : (req.isClubbed && req.requestIds?.length > 1) ? "Reject All" : "Reject"}
-                                                        </button>
-                                                        <button
-                                                            className="btn-primary"
-                                                            onClick={() => handleAction(reqKey, "approve", req.isClubbed, req.requestIds, req.project_id, req.progress?.percentage || 0)}
-                                                            style={{ padding: "8px 20px", fontSize: "13px", width: "auto" }}
-                                                            disabled={actionInProgress === reqKey}
-                                                        >
-                                                            {actionInProgress === reqKey ? "Processing..." : (req.isClubbed && req.requestIds?.length > 1) ? "Approve All" : "Approve"}
-                                                        </button>
-                                                    </>
-                                                ) : null}
-                                            </div>
+                                            {(() => {
+                                                 const actionableIds = (req.actionableRequestIds && req.actionableRequestIds.length > 0)
+                                                     ? req.actionableRequestIds
+                                                     : (req.subRequests || [req])
+                                                         .filter(s => role === "SUPER_ADMIN" ? s.status === "PENDING_ADMIN" : s.status === "PENDING_PM")
+                                                         .map(s => s.id);
+
+                                                 if (!actionableIds || actionableIds.length === 0) return null;
+
+                                                 return (
+                                                     <div style={{ display: "flex", gap: "8px" }}>
+                                                         <button
+                                                             className="btn-ghost"
+                                                             onClick={() => handleAction(reqKey, "reject", req.isClubbed, actionableIds, req.project_id, req.progress?.percentage || 0)}
+                                                             style={{ color: "#64748b", padding: "8px 16px", fontSize: "13px", border: "1px solid var(--border)" }}
+                                                             disabled={actionInProgress === reqKey}
+                                                         >
+                                                             {actionInProgress === reqKey ? "Processing..." : actionableIds.length > 1 ? "Reject All Pending" : "Reject"}
+                                                         </button>
+                                                         <button
+                                                             className="btn-primary"
+                                                             onClick={() => handleAction(reqKey, "approve", req.isClubbed, actionableIds, req.project_id, req.progress?.percentage || 0)}
+                                                             style={{ padding: "8px 20px", fontSize: "13px", width: "auto" }}
+                                                             disabled={actionInProgress === reqKey}
+                                                         >
+                                                             {actionInProgress === reqKey ? "Processing..." : actionableIds.length > 1 ? "Approve All Pending" : "Approve"}
+                                                         </button>
+                                                     </div>
+                                                 );
+                                             })()}
                                         </div>
                                     </div>
                                 )}
@@ -736,8 +819,31 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
             <ExpenseDetailModal
                 isOpen={!!selectedRequest}
                 onClose={() => setSelectedRequest(null)}
-                request={selectedRequest}
+                request={selectedRequest?.request ?? null}
                 role={role}
+                actionInProgress={selectedRequest ? actionInProgress === selectedRequest.request?.id : false}
+                onApprove={
+                    selectedRequest &&
+                        ((role === "PROJECT_MANAGER" && selectedRequest.request?.status === "PENDING_PM") ||
+                            (role === "SUPER_ADMIN" && selectedRequest.request?.status === "PENDING_ADMIN"))
+                        ? () => handleModalAction(selectedRequest.request, selectedRequest.groupKey, "approve", selectedRequest.progressPct)
+                        : undefined
+                }
+                onReject={
+                    selectedRequest &&
+                        ((role === "PROJECT_MANAGER" && selectedRequest.request?.status === "PENDING_PM") ||
+                            (role === "SUPER_ADMIN" && selectedRequest.request?.status === "PENDING_ADMIN"))
+                        ? () => handleModalAction(selectedRequest.request, selectedRequest.groupKey, "reject", selectedRequest.progressPct)
+                        : undefined
+                }
+                onPartialApprove={
+                    selectedRequest &&
+                        role === "PROJECT_MANAGER" &&
+                        selectedRequest.request?.status === "PENDING_PM" &&
+                        (selectedRequest.request?.materials?.length || 0) > 1
+                        ? (reqId, approvedIds, rejectedIds) => handlePartialApprove(reqId, approvedIds, rejectedIds)
+                        : undefined
+                }
             />
 
             {/* Budget Exceeded Dialog */}
