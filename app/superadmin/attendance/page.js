@@ -5,6 +5,7 @@ import { toast } from "react-hot-toast";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import ShimmerLoader from "@/components/ShimmerLoader";
+import { formatDateDDMMYYYY } from "@/lib/utils";
 
 export default function SuperadminAttendancePage() {
     const router = useRouter();
@@ -81,9 +82,7 @@ export default function SuperadminAttendancePage() {
 
     const formatDate = (dateString) => {
         if (!dateString) return "N/A";
-        return new Date(dateString).toLocaleDateString("en-IN", {
-            day: '2-digit', month: 'short', year: 'numeric'
-        });
+        return formatDateDDMMYYYY(dateString);
     };
 
     const formatTime = (dateString) => {

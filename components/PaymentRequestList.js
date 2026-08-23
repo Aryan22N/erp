@@ -4,6 +4,26 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import Toast from "./Toast";
 import ExpenseDetailModal from "./ExpenseDetailModal";
+import { formatDateDDMMYYYY } from "@/lib/utils";
+
+function ScrollSentinel({ onReachBottom }) {
+    const ref = useRef(null);
+
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (entries[0].isIntersecting) {
+                    onReachBottom();
+                }
+            },
+            { threshold: 0.1 }
+        );
+        if (ref.current) observer.observe(ref.current);
+        return () => observer.disconnect();
+    }, [onReachBottom]);
+
+    return <div ref={ref} style={{ height: "10px", width: "100%", margin: "4px 0" }} />;
+}
 
 export default function PaymentRequestList({ refreshTrigger, role, limit = null, showFilter = false }) {
     const [requests, setRequests] = useState([]);
@@ -22,6 +42,40 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
     const [savingNote, setSavingNote] = useState({}); // { requestId: boolean }
     const [selectedRequest, setSelectedRequest] = useState(null); // Request to show in modal
     const [budgetDialog, setBudgetDialog] = useState(null); // { pendingArgs, budgetData }
+    const [expandedGroups, setExpandedGroups] = useState({}); // { [groupKey]: boolean } - default collapsed
+    const [visibleCounts, setVisibleCounts] = useState({}); // { [groupKey]: number } - default 10
+    const [loadedSubRequests, setLoadedSubRequests] = useState({}); // { [groupKey]: Array }
+    const [loadingSubRequests, setLoadingSubRequests] = useState({}); // { [groupKey]: boolean }
+
+    const toggleGroup = async (req) => {
+        const key = getReqKey(req);
+        const willExpand = !expandedGroups[key];
+        setExpandedGroups(prev => ({ ...prev, [key]: willExpand }));
+
+        // On-demand lazy load: if expanding AND sub-requests for this date group are not yet loaded
+        if (willExpand && !loadedSubRequests[key]) {
+            const requestIds = req.requestIds || (req.id ? [req.id] : []);
+            if (requestIds.length > 0) {
+                setLoadingSubRequests(prev => ({ ...prev, [key]: true }));
+                try {
+                    const res = await fetch(`/api/payment-requests/group-details?ids=${requestIds.join(",")}`);
+                    const data = await res.json();
+                    if (Array.isArray(data)) {
+                        setLoadedSubRequests(prev => ({ ...prev, [key]: data }));
+                    }
+                } catch (err) {
+                    console.error("Error fetching sub-requests for group:", err);
+                } finally {
+                    setLoadingSubRequests(prev => ({ ...prev, [key]: false }));
+                }
+            }
+        }
+    };
+
+    const loadMoreSubRequests = (key) => {
+        setVisibleCounts(prev => ({ ...prev, [key]: (prev[key] || 10) + 10 }));
+    };
+
 
 
     const fetchRequests = async () => {
@@ -84,6 +138,14 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
         setTimeout(() => {
             setToasts(prev => prev.filter(t => t.id !== id));
         }, 4000);
+    };
+
+    const getReqKey = (req) => {
+        if (!req.isClubbed) return req.id;
+        if (req.clubKey) return req.clubKey;
+        const dateObj = new Date(req.created_at);
+        const dateKey = `${dateObj.getUTCFullYear()}-${String(dateObj.getUTCMonth() + 1).padStart(2, '0')}-${String(dateObj.getUTCDate()).padStart(2, '0')}`;
+        return `${req.project_id}-${dateKey}-${req.status}`;
     };
 
     const handleAction = async (id, action, isClubbed = false, requestIds = [], projectId = null, currentPct = 0, isSubRequest = false, overrideBudget = false) => {
@@ -162,8 +224,7 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
                     }).filter(Boolean));
                 } else {
                     setRequests(prev => prev.filter(req => {
-                        // Check both ID types for clubbed vs single
-                        const groupKey = req.isClubbed ? (role === "PROJECT_MANAGER" ? `${req.project_id}-${req.status}-PM_GROUP` : `${req.project_id}-${new Date(req.created_at).toLocaleDateString("en-IN")}-${req.status}`) : req.id;
+                        const groupKey = getReqKey(req);
                         return groupKey !== id;
                     }));
                 }
@@ -360,160 +421,278 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
                 </div>
             ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                    {displayedRequests.map((req) => (
-                        <div key={req.isClubbed
-                            ? (role === "PROJECT_MANAGER"
-                                ? `${req.project_id}-${req.status}-PM_GROUP`
-                                : `${req.project_id}-${new Date(req.created_at).toLocaleDateString("en-IN")}-${req.status}`)
-                            : req.id} className="glass-card" style={{ padding: "24px", paddingTop: req.isClubbed ? "12px" : "24px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "20px", borderLeft: req.isClubbed ? "4px solid var(--primary)" : "none" }}>
-                            <div style={{ flex: "1 1 300px", minWidth: "0" }}>
-                                {req.isClubbed && (
-                                    <div style={{ fontSize: "10px", fontWeight: 700, textTransform: "uppercase", color: "var(--primary)", letterSpacing: "0.5px", marginBottom: "8px" }}>
-                                        📅 Day Summary • Grouped by Date
-                                    </div>
-                                )}
-                                <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "8px", flexWrap: "wrap" }}>
-                                    <span style={{ fontWeight: 700, fontSize: "16px" }}>{req.project?.name}</span>
-                                    <span className="role-badge" style={{ background: `${getStatusColor(req.status)}20`, color: getStatusColor(req.status), border: `1px solid ${getStatusColor(req.status)}30` }}>
-                                        {(req.isClubbed && req.requestIds?.length > 1) ? `${req.status.replace("_", " ")} (ALL)` : req.status.replace("_", " ")}
-                                    </span>
-                                </div>
-                                <div style={{ fontSize: "13px", color: "var(--text-muted)" }}>
-                                    {req.isClubbed ? "Requested by: " : "Requested by: "}{req.supervisor?.name || "Self"} • {new Date(req.created_at).toLocaleDateString()}
-                                    {req.status === "REJECTED" && req.pm?.name && (
-                                        <div style={{ marginTop: "4px", color: "#f87171", fontSize: "12px", fontWeight: 500 }}>
-                                            ❌ Rejected by: {req.pm.name}
-                                        </div>
-                                    )}
-                                    {req.status === "PAID" && req.pm?.name && (
-                                        <div style={{ marginTop: "4px", color: "#10b981", fontSize: "12px", fontWeight: 500 }}>
-                                            ✓ Approved by: {req.pm.name}
-                                        </div>
-                                    )}
-                                </div>
-                                <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "10px" }}>
-                                    <div style={{ display: "flex", gap: "8px" }}>
-                                        <button 
-                                            className="btn-ghost"
-                                            style={{ padding: "8px 16px", fontSize: "12px", border: "1px solid var(--border)" }}
-                                            onClick={() => setSelectedRequest(req)}
+                    {displayedRequests.map((req) => {
+                        const reqKey = getReqKey(req);
+                        const isExpanded = !!expandedGroups[reqKey];
+                        const isSubLoading = !!loadingSubRequests[reqKey];
+                        const fetchedSubList = loadedSubRequests[reqKey];
+                        const subList = fetchedSubList && fetchedSubList.length > 0 ? fetchedSubList : (req.subRequests && req.subRequests.length > 0 ? req.subRequests : [req]);
+                        const visibleCount = visibleCounts[reqKey] || 10;
+                        const displayedSubList = subList.slice(0, visibleCount);
+                        const hasMoreSubRequests = visibleCount < subList.length;
+
+                        return (
+                            <div
+                                key={reqKey}
+                                className="glass-card"
+                                style={{
+                                    padding: "18px 24px",
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: "14px",
+                                    borderLeft: req.isClubbed ? "4px solid var(--primary)" : "1px solid var(--border)",
+                                    transition: "all 0.25s ease"
+                                }}
+                            >
+                                {/* Accordion Header Row (Project Name + Date + Status on Left, Expand arrow on Right, NO TOTAL AMOUNT) */}
+                                <div
+                                    style={{
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        alignItems: "center",
+                                        cursor: "pointer",
+                                        userSelect: "none"
+                                    }}
+                                    onClick={() => toggleGroup(req)}
+                                >
+                                    <div style={{ display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" }}>
+                                        <span style={{ fontWeight: 800, fontSize: "19px", color: "var(--text-primary)", letterSpacing: "-0.02em" }}>
+                                            {req.project?.name}
+                                        </span>
+                                        <span style={{ fontSize: "16px", color: "var(--text-muted)", fontWeight: 600 }}>
+                                            • {formatDateDDMMYYYY(req.created_at)}
+                                        </span>
+                                        <span
+                                            className="role-badge"
+                                            style={{
+                                                background: `${getStatusColor(req.status)}20`,
+                                                color: getStatusColor(req.status),
+                                                border: `1px solid ${getStatusColor(req.status)}30`,
+                                                fontSize: "13px",
+                                                fontWeight: 700,
+                                                padding: "4px 12px"
+                                            }}
                                         >
-                                            📄 View Details
-                                        </button>
-                                        
-                                        {((role === "SUPERVISOR" && req.status === "PENDING_PM") || (role === "MANAGER_OWN_REQUESTS" && (req.status === "PENDING_ADMIN" || req.status === "PENDING_PM"))) && !req.isClubbed && (
-                                            <>
-                                                <Link 
-                                                    href={`/${role === "SUPERVISOR" ? "supervisor" : "manager"}/dashboard/edit-expense/${req.id}`}
-                                                    className="btn-ghost"
-                                                    style={{ padding: "8px 16px", fontSize: "12px", border: "1px solid var(--primary)", color: "var(--primary)", textDecoration: "none", display: "inline-block" }}
-                                                >
-                                                    ✏️ Edit
-                                                </Link>
-                                                <button 
-                                                    className="btn-ghost"
-                                                    style={{ padding: "8px 16px", fontSize: "12px", border: "1px solid #fecaca", color: "#ef4444", background: "#fef2f2" }}
-                                                    onClick={() => handleDeleteRequest(req.id)}
-                                                >
-                                                    🗑️ Delete
-                                                </button>
-                                            </>
-                                        )}
+                                            {(req.isClubbed && req.requestIds?.length > 1) ? `${req.status.replace("_", " ")} (${req.requestIds.length})` : req.status.replace("_", " ")}
+                                        </span>
                                     </div>
 
-                                    {req.isClubbed && req.subRequests && role === "PROJECT_MANAGER" && (
-                                        <div style={{ display: "flex", flexDirection: "column", gap: "10px", width: "100%" }}>
-                                            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginTop: "8px", borderTop: "1px dashed var(--border)", paddingTop: "12px" }}>
-                                                {req.subRequests.map((sub) => (
-                                                    <div key={sub.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "6px 12px", background: "rgba(15, 23, 42, 0.02)", borderRadius: "6px", border: "1px solid rgba(15, 23, 42, 0.05)" }}>
-                                                        <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-primary)" }}>
-                                                            Req #{sub.id} (₹{parseFloat(sub.total_amount).toLocaleString()})
-                                                        </span>
-                                                        {req.status === "PENDING_PM" && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={(e) => {
-                                                                    e.preventDefault();
-                                                                    e.stopPropagation();
-                                                                    handleAction(sub.id, "reject", false, [], sub.project_id, req.progress?.percentage || 0, true);
-                                                                }}
-                                                                title="Reject & Remove this specific request"
-                                                                style={{ border: "none", background: "rgba(248, 113, 113, 0.1)", color: "#ef4444", padding: "4px 8px", borderRadius: "4px", cursor: "pointer", fontSize: "12px", display: "flex", alignItems: "center", justifyContent: "center" }}
-                                                            >
-                                                                ❌ Remove
-                                                            </button>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                                        <button
+                                            type="button"
+                                            className="btn-ghost"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                toggleGroup(req);
+                                            }}
+                                            style={{
+                                                padding: "8px 18px",
+                                                fontSize: "13px",
+                                                fontWeight: 600,
+                                                border: "1px solid var(--border)",
+                                                borderRadius: "8px",
+                                                background: "rgba(255,255,255,0.05)",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                gap: "6px"
+                                            }}
+                                        >
+                                            {isExpanded ? "Collapse ▲" : "Expand ▼"}
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Accordion Expanded Body */}
+                                {isExpanded && (
+                                    <div
+                                        style={{
+                                            borderTop: "1px solid var(--border)",
+                                            paddingTop: "16px",
+                                            display: "flex",
+                                            flexDirection: "column",
+                                            gap: "14px",
+                                            animation: "fadeUp 0.2s ease both"
+                                        }}
+                                    >
+                                        {isSubLoading ? (
+                                            <div style={{ padding: "16px 0", textAlign: "center", color: "var(--text-muted)", fontSize: "13px" }}>
+                                                <div className="premium-shimmer" style={{ height: "64px", width: "100%", borderRadius: "10px", marginBottom: "8px" }}></div>
+                                                Loading details for {formatDateDDMMYYYY(req.created_at)}...
+                                            </div>
+                                        ) : (
+                                            <>
+                                                {/* Sub-Requests Listing Header Counter */}
+                                                {subList.length > 1 && (
+                                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px", color: "var(--text-muted)", fontWeight: 600 }}>
+                                                        <span>Showing {displayedSubList.length} of {subList.length} requests</span>
+                                                        {hasMoreSubRequests && (
+                                                            <span style={{ color: "var(--primary)", fontWeight: 700 }}>
+                                                                {subList.length - displayedSubList.length} remaining
+                                                            </span>
                                                         )}
                                                     </div>
-                                                ))}
+                                                )}
+
+                                                {/* Sub-Requests Listing */}
+                                                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                                                    {displayedSubList.map((sub, idx) => (
+                                                        <div
+                                                            key={sub.id || idx}
+                                                            style={{
+                                                                display: "flex",
+                                                                justifyContent: "space-between",
+                                                                alignItems: "center",
+                                                                padding: "14px 16px",
+                                                                background: "rgba(15, 23, 42, 0.02)",
+                                                                borderRadius: "10px",
+                                                                border: "1px solid var(--border)",
+                                                                flexWrap: "wrap",
+                                                                gap: "12px"
+                                                            }}
+                                                        >
+                                                            <div>
+                                                                <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--text-primary)" }}>
+                                                                    Requested by: {sub.supervisor?.name || "Self"}
+                                                                </div>
+                                                                <div style={{ fontSize: "13px", color: "var(--text-muted)", marginTop: "2px" }}>
+                                                                    Amount: <strong style={{ color: "var(--text-primary)" }}>₹{parseFloat(sub.total_amount).toLocaleString()}</strong>
+                                                                </div>
+                                                            </div>
+
+                                                            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                                                                <button
+                                                                    type="button"
+                                                                    className="btn-ghost"
+                                                                    style={{ padding: "6px 14px", fontSize: "12px", border: "1px solid var(--border)" }}
+                                                                    onClick={() => setSelectedRequest(sub)}
+                                                                >
+                                                                    📄 View Details
+                                                                </button>
+
+                                                                {((role === "SUPERVISOR" && sub.status === "PENDING_PM") || (role === "MANAGER_OWN_REQUESTS" && (sub.status === "PENDING_ADMIN" || sub.status === "PENDING_PM"))) && !req.isClubbed && (
+                                                                    <>
+                                                                        <Link 
+                                                                            href={`/${role === "SUPERVISOR" ? "supervisor" : "manager"}/dashboard/edit-expense/${sub.id}`}
+                                                                            className="btn-ghost"
+                                                                            style={{ padding: "6px 14px", fontSize: "12px", border: "1px solid var(--primary)", color: "var(--primary)", textDecoration: "none", display: "inline-block" }}
+                                                                        >
+                                                                            ✏️ Edit
+                                                                        </Link>
+                                                                        <button 
+                                                                            className="btn-ghost"
+                                                                            style={{ padding: "6px 14px", fontSize: "12px", border: "1px solid #fecaca", color: "#ef4444", background: "#fef2f2" }}
+                                                                            onClick={() => handleDeleteRequest(sub.id)}
+                                                                        >
+                                                                            🗑️ Delete
+                                                                        </button>
+                                                                    </>
+                                                                )}
+
+                                                                {(role === "PROJECT_MANAGER" && sub.status === "PENDING_PM") || (role === "SUPER_ADMIN" && sub.status === "PENDING_ADMIN") ? (
+                                                                    <>
+                                                                        <button
+                                                                            type="button"
+                                                                            className="btn-ghost"
+                                                                            style={{
+                                                                                padding: "6px 14px",
+                                                                                fontSize: "12px",
+                                                                                border: "1px solid #fca5a5",
+                                                                                color: "#ef4444",
+                                                                                background: "rgba(248, 113, 113, 0.05)"
+                                                                            }}
+                                                                            onClick={() => handleAction(sub.id, "reject", false, [], sub.project_id, req.progress?.percentage || 0, true)}
+                                                                        >
+                                                                            Reject
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            className="btn-primary"
+                                                                            style={{ padding: "6px 14px", fontSize: "12px", width: "auto" }}
+                                                                            onClick={() => handleAction(sub.id, "approve", false, [], sub.project_id, req.progress?.percentage || 0, true)}
+                                                                        >
+                                                                            Approve
+                                                                        </button>
+                                                                    </>
+                                                                ) : null}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </>
+                                        )}
+
+                                        {/* Infinite Scroll Sentinel & Load Next 10 Trigger */}
+                                        {hasMoreSubRequests && (
+                                            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px", marginTop: "8px" }}>
+                                                <ScrollSentinel onReachBottom={() => loadMoreSubRequests(reqKey)} />
+                                                <button
+                                                    type="button"
+                                                    className="btn-ghost"
+                                                    onClick={() => loadMoreSubRequests(reqKey)}
+                                                    style={{
+                                                        padding: "8px 24px",
+                                                        fontSize: "12px",
+                                                        fontWeight: 600,
+                                                        border: "1px dashed var(--primary)",
+                                                        color: "var(--primary)",
+                                                        borderRadius: "8px"
+                                                    }}
+                                                >
+                                                    ⬇️ Load Next 10 Requests ({subList.length - displayedSubList.length} remaining)
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {/* Footer: Cumulative Total Sum & Bulk Actions */}
+                                        <div
+                                            style={{
+                                                display: "flex",
+                                                justifyContent: "space-between",
+                                                alignItems: "center",
+                                                paddingTop: "14px",
+                                                borderTop: "1px dashed var(--border)",
+                                                marginTop: "6px",
+                                                flexWrap: "wrap",
+                                                gap: "12px"
+                                            }}
+                                        >
+                                            <div>
+                                                <span style={{ fontSize: "13px", color: "var(--text-muted)", fontWeight: 600 }}>
+                                                    📊 Cumulative Group Total:{" "}
+                                                </span>
+                                                <span style={{ fontSize: "18px", fontWeight: 800, color: "var(--text-primary)" }}>
+                                                    ₹{parseFloat(req.total_amount).toLocaleString()}
+                                                </span>
+                                            </div>
+
+                                            <div style={{ display: "flex", gap: "8px" }}>
+                                                {(role === "PROJECT_MANAGER" && req.status === "PENDING_PM") || (role === "SUPER_ADMIN" && req.status === "PENDING_ADMIN") ? (
+                                                    <>
+                                                        <button
+                                                            className="btn-ghost"
+                                                            onClick={() => handleAction(reqKey, "reject", req.isClubbed, req.requestIds, req.project_id, req.progress?.percentage || 0)}
+                                                            style={{ color: "#64748b", padding: "8px 16px", fontSize: "13px", border: "1px solid var(--border)" }}
+                                                            disabled={actionInProgress === reqKey}
+                                                        >
+                                                            {actionInProgress === reqKey ? "Processing..." : (req.isClubbed && req.requestIds?.length > 1) ? "Reject All" : "Reject"}
+                                                        </button>
+                                                        <button
+                                                            className="btn-primary"
+                                                            onClick={() => handleAction(reqKey, "approve", req.isClubbed, req.requestIds, req.project_id, req.progress?.percentage || 0)}
+                                                            style={{ padding: "8px 20px", fontSize: "13px", width: "auto" }}
+                                                            disabled={actionInProgress === reqKey}
+                                                        >
+                                                            {actionInProgress === reqKey ? "Processing..." : (req.isClubbed && req.requestIds?.length > 1) ? "Approve All" : "Approve"}
+                                                        </button>
+                                                    </>
+                                                ) : null}
                                             </div>
                                         </div>
-                                    )}
-                                </div>
-
-
-
+                                    </div>
+                                )}
                             </div>
-
-                            <div style={{ textAlign: "right", flex: "1 1 100%", smFlex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                                <div className="stat-value" style={{ fontSize: "20px", marginBottom: "12px" }}>
-                                    ₹{parseFloat(req.total_amount).toLocaleString()}
-                                </div>
-
-                                <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", width: "100%" }}>
-                                    {(role === "PROJECT_MANAGER" && req.status === "PENDING_PM") || (role === "SUPER_ADMIN" && req.status === "PENDING_ADMIN") ? (
-                                        <>
-                                            <button
-                                                className="btn-ghost"
-                                                onClick={() => {
-                                                    const groupId = req.isClubbed ? (role === "PROJECT_MANAGER" ? `${req.project_id}-${req.status}-PM_GROUP` : `${req.project_id}-${new Date(req.created_at).toLocaleDateString("en-IN")}-${req.status}`) : req.id;
-                                                    handleAction(groupId, "reject", req.isClubbed, req.requestIds, req.project_id, req.progress?.percentage || 0);
-                                                }}
-                                                style={{
-                                                    color: "#64748b",
-                                                    flex: 1,
-                                                    whiteSpace: "nowrap",
-                                                    opacity: actionInProgress === (req.isClubbed ? (role === "PROJECT_MANAGER" ? `${req.project_id}-${req.status}-PM_GROUP` : `${req.project_id}-${new Date(req.created_at).toLocaleDateString("en-IN")}-${req.status}`) : req.id) ? 0.5 : 1,
-                                                    cursor: actionInProgress === (req.isClubbed ? (role === "PROJECT_MANAGER" ? `${req.project_id}-${req.status}-PM_GROUP` : `${req.project_id}-${new Date(req.created_at).toLocaleDateString("en-IN")}-${req.status}`) : req.id) ? 'not-allowed' : 'pointer',
-                                                    border: '1px solid var(--border)'
-                                                }}
-                                                onMouseEnter={(e) => {
-                                                    e.target.style.background = '#f1f5f9';
-                                                    e.target.style.borderColor = '#cbd5e1';
-                                                    e.target.style.color = '#475569';
-                                                }}
-                                                onMouseLeave={(e) => {
-                                                    e.target.style.background = 'transparent';
-                                                    e.target.style.borderColor = 'var(--border)';
-                                                    e.target.style.color = '#64748b';
-                                                }}
-                                                disabled={actionInProgress === (req.isClubbed ? (role === "PROJECT_MANAGER" ? `${req.project_id}-${req.status}-PM_GROUP` : `${req.project_id}-${new Date(req.created_at).toLocaleDateString("en-IN")}-${req.status}`) : req.id)}
-                                            >
-                                                {actionInProgress === (req.isClubbed ? (role === "PROJECT_MANAGER" ? `${req.project_id}-${req.status}-PM_GROUP` : `${req.project_id}-${new Date(req.created_at).toLocaleDateString("en-IN")}-${req.status}`) : req.id) ? "Processing..." : (req.isClubbed && req.requestIds?.length > 1) ? "Reject All" : "Reject"}
-                                            </button>
-                                            <button
-                                                className="btn-primary"
-                                                onClick={() => {
-                                                    const groupId = req.isClubbed ? (role === "PROJECT_MANAGER" ? `${req.project_id}-${req.status}-PM_GROUP` : `${req.project_id}-${new Date(req.created_at).toLocaleDateString("en-IN")}-${req.status}`) : req.id;
-                                                    handleAction(groupId, "approve", req.isClubbed, req.requestIds, req.project_id, req.progress?.percentage || 0);
-                                                }}
-                                                style={{
-                                                    width: "auto",
-                                                    padding: "8px 20px",
-                                                    flex: 1,
-                                                    whiteSpace: "nowrap",
-                                                    opacity: actionInProgress === (req.isClubbed ? (role === "PROJECT_MANAGER" ? `${req.project_id}-${req.status}-PM_GROUP` : `${req.project_id}-${new Date(req.created_at).toLocaleDateString("en-IN")}-${req.status}`) : req.id) ? 0.5 : 1,
-                                                    cursor: actionInProgress === (req.isClubbed ? (role === "PROJECT_MANAGER" ? `${req.project_id}-${req.status}-PM_GROUP` : `${req.project_id}-${new Date(req.created_at).toLocaleDateString("en-IN")}-${req.status}`) : req.id) ? 'not-allowed' : 'pointer'
-                                                }}
-                                                disabled={actionInProgress === (req.isClubbed ? (role === "PROJECT_MANAGER" ? `${req.project_id}-${req.status}-PM_GROUP` : `${req.project_id}-${new Date(req.created_at).toLocaleDateString("en-IN")}-${req.status}`) : req.id)}
-                                            >
-                                                {actionInProgress === (req.isClubbed ? (role === "PROJECT_MANAGER" ? `${req.project_id}-${req.status}-PM_GROUP` : `${req.project_id}-${new Date(req.created_at).toLocaleDateString("en-IN")}-${req.status}`) : req.id) ? "Processing..." : (req.isClubbed && req.requestIds?.length > 1) ? "Approve All" : "Approve"}
-                                            </button>
-                                        </>
-                                    ) : null}
-                                </div>
-                            </div>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             )}
 

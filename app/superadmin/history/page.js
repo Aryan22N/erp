@@ -7,6 +7,7 @@ import Image from "next/image";
 import ShimmerLoader from "@/components/ShimmerLoader";
 import TableShimmerLoader from "@/components/TableShimmerLoader";
 import CardShimmerLoader from "@/components/CardShimmerLoader";
+import { formatDateDDMMYYYY } from "@/lib/utils";
 
 export default function PaymentHistory() {
     const [requests, setRequests] = useState([]);
@@ -71,7 +72,7 @@ export default function PaymentHistory() {
         csvRows.push(headers.join(","));
 
         requests.forEach(req => {
-            const date = new Date(req.created_at).toLocaleDateString();
+            const date = formatDateDDMMYYYY(req.created_at);
             const project = req.project?.name || "";
             const requestedBy = req.supervisor?.name || "Self";
             const approver = req.pm?.name || "Pending/N/A";
@@ -237,7 +238,7 @@ export default function PaymentHistory() {
                             ) : (
                                 filteredRequests.map((req) => (
                                 <tr key={req.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                                    <td style={{ padding: "16px 12px", fontSize: "14px" }}>{new Date(req.created_at).toLocaleDateString()}</td>
+                                    <td style={{ padding: "16px 12px", fontSize: "14px" }}>{formatDateDDMMYYYY(req.created_at)}</td>
                                     <td style={{ padding: "16px 12px", fontSize: "14px", fontWeight: 600 }}>{req.project?.name}</td>
                                     <td style={{ padding: "16px 12px", fontSize: "14px" }}>{req.supervisor?.name || "Self"}</td>
                                     <td style={{ padding: "16px 12px", fontSize: "14px" }}>{req.pm?.name || "Pending/N/A"}</td>

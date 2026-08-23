@@ -1,15 +1,75 @@
 import { prisma } from "@/lib/db";
 import { getUser, hasRole } from "@/lib/auth";
 import { NextResponse } from "next/server";
+import { getISTDateKey, getISTDayBounds } from "@/lib/utils";
 
 export const dynamic = "force-dynamic"; // Rebuild after cache clear
+
+function clubRequestsByISTDay(requests, compact) {
+    const clubbedMap = {};
+
+    for (const req of requests) {
+        const dateKey = getISTDateKey(req.created_at);
+        const clubKey = `${req.project_id}-${dateKey}-${req.status}`;
+
+        if (!clubbedMap[clubKey]) {
+            clubbedMap[clubKey] = {
+                id: req.id,
+                isClubbed: true,
+                clubKey,
+                istDateKey: dateKey,
+                created_at: req.created_at,
+                project_id: req.project_id,
+                project: req.project,
+                status: req.status,
+                pm: req.pm || null,
+                requestIds: [req.id],
+                _total_amount: parseFloat(req.total_amount),
+                _supervisor_names: [req.supervisor?.name || "Self"],
+            };
+            if (!compact) {
+                clubbedMap[clubKey]._materials = [...(req.materials || [])];
+                clubbedMap[clubKey].subRequests = [req];
+            }
+        } else {
+            const group = clubbedMap[clubKey];
+            group.requestIds.push(req.id);
+            group._total_amount += parseFloat(req.total_amount);
+            if (req.supervisor?.name && !group._supervisor_names.includes(req.supervisor.name)) {
+                group._supervisor_names.push(req.supervisor.name);
+            }
+            if (!compact) {
+                group._materials.push(...(req.materials || []));
+                group.subRequests.push(req);
+            }
+        }
+    }
+
+    return Object.values(clubbedMap)
+        .map((c) => {
+            const { _total_amount, _supervisor_names, _materials, ...rest } = c;
+            return {
+                ...rest,
+                total_amount: _total_amount,
+                supervisor: { name: _supervisor_names.join(", ") },
+                ...(_materials ? { materials: _materials } : {}),
+            };
+        })
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+}
 
 // GET: Fetch requests based on role
 export async function GET(req) {
     try {
         const { searchParams } = new URL(req.url);
+<<<<<<< Updated upstream
         const limitParam = searchParams.get("limit");
         const limit = limitParam ? parseInt(limitParam) : 2000;
+=======
+        const limitParam = searchParams.get('limit');
+        // Only enforce limit if limitParam is explicitly provided in the request
+        const limit = limitParam ? parseInt(limitParam) : null;
+>>>>>>> Stashed changes
         const statusParam = searchParams.get('status');
         const projectParam = searchParams.get('project');
         const ownParam = searchParams.get('own');
@@ -26,7 +86,7 @@ export async function GET(req) {
                 where: { supervisor_id: user.id },
                 include: { project: true, materials: true },
                 orderBy: { created_at: "desc" },
-                take: limit
+                ...(limit ? { take: limit } : {})
             });
         } else if (hasRole(user, "PROJECT_MANAGER")) {
             if (ownParam === 'true') {
@@ -44,7 +104,7 @@ export async function GET(req) {
                         supervisor: { select: { name: true } }
                     },
                     orderBy: { created_at: "desc" },
-                    take: limit
+                    ...(limit ? { take: limit } : {})
                 });
             } else {
                 const pmWhere = {
@@ -81,42 +141,12 @@ if (projectParam) {
                         supervisor: { select: { name: true } }
                     },
                     orderBy: { created_at: "desc" },
-                    take: limit
+                    ...(limit ? { take: limit } : {})
                 });
 
-                // Project-wise clubbing for Manager
-                const clubbedMap = {};
-                for (const req of requests) {
-                    const clubKey = `${req.project_id}-${req.status}-PM_GROUP`;
-                    if (!clubbedMap[clubKey]) {
-                        clubbedMap[clubKey] = {
-                            ...req,
-                            isClubbed: true,
-                            requestIds: [req.id],
-                            _materials: [...req.materials],
-                            _total_amount: parseFloat(req.total_amount),
-                            _supervisor_names: [req.supervisor?.name || "Self"],
-                            subRequests: [req]
-                        };
-                    } else {
-                        clubbedMap[clubKey].requestIds.push(req.id);
-                        clubbedMap[clubKey]._materials.push(...req.materials);
-                        clubbedMap[clubKey]._total_amount += parseFloat(req.total_amount);
-                        if (req.supervisor?.name && !clubbedMap[clubKey]._supervisor_names.includes(req.supervisor.name)) {
-                            clubbedMap[clubKey]._supervisor_names.push(req.supervisor.name);
-                        }
-                        clubbedMap[clubKey].subRequests.push(req);
-                    }
-                }
-
-                requests = Object.values(clubbedMap).map(c => ({
-                    ...c,
-                    materials: c._materials,
-                    total_amount: c._total_amount,
-                    supervisor: { name: c._supervisor_names.join(", ") }
-                }));
-
-                requests.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                // Day-wise clubbing for Manager — uses IST-aware helper so dates
+                // are always grouped by the IST calendar day, not UTC.
+                requests = clubRequestsByISTDay(requests, false);
             }
         } else if (hasRole(user, "SUPER_ADMIN")) {
             const adminWhere = {};
@@ -141,45 +171,12 @@ if (projectParam) {
                     pm: { select: { name: true } }
                 },
                 orderBy: { created_at: "desc" },
-                take: limit
+                ...(limit ? { take: limit } : {})
             });
 
-            // Day-wise clubbing for Super Admin
-            const clubbedMap = {};
-            
-            for (const req of requests) {
-                const dateKey = new Date(req.created_at).toLocaleDateString("en-IN");
-                const clubKey = `${req.project_id}-${dateKey}-${req.status}`;
-                
-                if (!clubbedMap[clubKey]) {
-                    clubbedMap[clubKey] = {
-                        ...req,
-                        isClubbed: true,
-                        requestIds: [req.id],
-                        _materials: [...req.materials],
-                        _total_amount: parseFloat(req.total_amount),
-                        _supervisor_names: [req.supervisor?.name || "Self"]
-                    };
-                } else {
-                    clubbedMap[clubKey].requestIds.push(req.id);
-                    clubbedMap[clubKey]._materials.push(...req.materials);
-                    clubbedMap[clubKey]._total_amount += parseFloat(req.total_amount);
-                    if (req.supervisor?.name && !clubbedMap[clubKey]._supervisor_names.includes(req.supervisor.name)) {
-                        clubbedMap[clubKey]._supervisor_names.push(req.supervisor.name);
-                    }
-                }
-            }
-            
-            // Map back to array structure expected by frontend
-            requests = Object.values(clubbedMap).map(c => ({
-                ...c,
-                materials: c._materials,
-                total_amount: c._total_amount,
-                supervisor: { name: c._supervisor_names.join(", ") }
-            }));
-            
-            // Re-sort by date
-            requests.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            // Day-wise clubbing for Super Admin — uses IST-aware helper so dates
+            // are always grouped by the IST calendar day, not UTC.
+            requests = clubRequestsByISTDay(requests, false);
         }
 
         // Attach latest progress for each project (for PM and Super Admin)
@@ -245,11 +242,10 @@ export async function POST(req) {
 
         const parsedProjectId = parseInt(project_id);
 
-        // Check for existing same-day PENDING_PM request for this project by this supervisor
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
-        const todayEnd = new Date();
-        todayEnd.setHours(23, 59, 59, 999);
+        // Check for existing same-day PENDING_PM request for this project by this supervisor.
+        // Use IST day bounds so that requests submitted near midnight IST are always
+        // merged against the correct IST calendar day, not the UTC calendar day.
+        const { start: todayStart, end: todayEnd } = getISTDayBounds();
 
         const isManager = hasRole(user, "PROJECT_MANAGER");
         const targetStatus = isManager ? "PENDING_ADMIN" : "PENDING_PM";
