@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getUser } from "@/lib/auth";
+import { getISTAttendanceDayStart } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -11,15 +12,11 @@ export async function GET() {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        // Day boundary at 3:00 AM, same convention the app already used, just
-        // for grouping "today's" sessions for display — it no longer blocks
-        // anything.
+        // Day boundary at 3:00 AM IST, same convention the app already used.
+        // Uses the IST-aware helper so the boundary is always at the correct
+        // absolute UTC timestamp regardless of the server's local timezone.
         const now = new Date();
-        const startOfDay = new Date(now);
-        if (startOfDay.getHours() < 3) {
-            startOfDay.setDate(startOfDay.getDate() - 1);
-        }
-        startOfDay.setHours(3, 0, 0, 0);
+        const startOfDay = getISTAttendanceDayStart();
 
         // Every check-in/check-out pair for today, oldest first. This is the
         // raw log — nothing here is a computed/stored aggregate.

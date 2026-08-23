@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import Toast from "@/components/Toast";
+import { formatDateDDMMYYYY } from "@/lib/utils";
 
 export default function StoredImagesGallery() {
     const router = useRouter();
@@ -174,7 +175,7 @@ export default function StoredImagesGallery() {
                                     </div>
                                     <div style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "12px" }}>
                                         Uploaded by: {m.supervisorName} <br />
-                                        {new Date(m.date).toLocaleDateString()}
+                                        {formatDateDDMMYYYY(m.date)}
                                     </div>
                                     <div style={{ display: "flex", gap: "10px" }}>
                                         <button 
