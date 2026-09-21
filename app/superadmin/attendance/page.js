@@ -323,10 +323,20 @@ export default function SuperadminAttendancePage() {
                                                                     borderRadius: "4px",
                                                                     fontSize: "12px",
                                                                     fontWeight: "600",
-                                                                    background: record.status === "CHECKED_IN" ? "rgba(59, 130, 246, 0.1)" : "rgba(16, 185, 129, 0.1)",
-                                                                    color: record.status === "CHECKED_IN" ? "#3b82f6" : "var(--success)"
+                                                                    background: record.status === "CHECKED_IN"
+                                                                        ? "rgba(59, 130, 246, 0.1)"
+                                                                        : record.status === "AUTO_CHECKOUT"
+                                                                        ? "rgba(245, 158, 11, 0.1)"
+                                                                        : "rgba(16, 185, 129, 0.1)",
+                                                                    color: record.status === "CHECKED_IN"
+                                                                        ? "#3b82f6"
+                                                                        : record.status === "AUTO_CHECKOUT"
+                                                                        ? "#f59e0b"
+                                                                        : "var(--success)"
                                                                 }}>
-                                                                    {record.status.replace("_", " ")}
+                                                                    {record.status === "AUTO_CHECKOUT"
+                                                                        ? "AUTO CHECKOUT"
+                                                                        : record.status.replace("_", " ")}
                                                                 </span>
                                                             </td>
                                                         </tr>
