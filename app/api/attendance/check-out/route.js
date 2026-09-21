@@ -49,7 +49,8 @@ export async function POST(req) {
             return NextResponse.json({ success: false, message: "Invalid or inactive checkout site." }, { status: 400 });
         }
 
-        // Verify the user is still within the geofence of the checkout site.
+        // Verify the user is within the geofence of the checkout site.
+        // This may be a different site from the check-in site — that is intentional.
         const distance = calculateDistance(checkoutSite.latitude, checkoutSite.longitude, latitude, longitude);
 
         if (distance > checkoutSite.radius) {
@@ -62,16 +63,15 @@ export async function POST(req) {
         const now = new Date();
         const checkInTime = new Date(activeSession.checkInTime);
 
-        // Duration is derived purely from the two raw timestamps we locked in
-        // (checkInTime, now) via plain JS math — not from any DB-side
-        // computation or trigger. We still cache it on the row for convenience,
-        // but every report should feel free to recompute it the same way from
-        // checkInTime/checkOutTime rather than trusting this cached value.
+        // Duration derived purely from raw timestamps via JS math — not from any
+        // DB-side computation. The cached value is convenient but reports should
+        // recompute from checkInTime/checkOutTime if they need accuracy.
         const durationMinutes = Math.floor((now - checkInTime) / (1000 * 60));
 
         const checkOutLog = await prisma.attendance.update({
             where: { id: activeSession.id },
             data: {
+                checkOutSiteId: checkoutSite.id,  // new split-site column (Phase B)
                 checkOutTime: now,
                 checkOutLatitude: latitude,
                 checkOutLongitude: longitude,

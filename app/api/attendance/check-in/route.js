@@ -67,7 +67,8 @@ export async function POST(req) {
         const checkInLog = await prisma.attendance.create({
             data: {
                 userId: user.id,
-                siteId: site.id,
+                checkInSiteId: site.id,   // new split-site column (Phase B)
+                siteId: site.id,          // legacy column — kept until Phase C cleanup
                 checkInTime: new Date(),
                 checkInLatitude: latitude,
                 checkInLongitude: longitude,

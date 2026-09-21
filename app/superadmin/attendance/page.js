@@ -301,7 +301,8 @@ export default function SuperadminAttendancePage() {
                                                     <tr style={{ background: "rgba(255,255,255,0.02)", borderBottom: "1px solid var(--border)" }}>
                                                         <th style={{ padding: "16px", textAlign: "left", fontSize: "14px", fontWeight: "600", color: "var(--text-muted)" }}>Date</th>
                                                         <th style={{ padding: "16px", textAlign: "left", fontSize: "14px", fontWeight: "600", color: "var(--text-muted)" }}>{filterRole === "PROJECT_MANAGER" ? "Manager" : "Supervisor"}</th>
-                                                        <th style={{ padding: "16px", textAlign: "left", fontSize: "14px", fontWeight: "600", color: "var(--text-muted)" }}>Site</th>
+                                                        <th style={{ padding: "16px", textAlign: "left", fontSize: "14px", fontWeight: "600", color: "var(--text-muted)" }}>Check-In Site</th>
+                                                        <th style={{ padding: "16px", textAlign: "left", fontSize: "14px", fontWeight: "600", color: "var(--text-muted)" }}>Check-Out Site</th>
                                                         <th style={{ padding: "16px", textAlign: "left", fontSize: "14px", fontWeight: "600", color: "var(--text-muted)" }}>Check-In</th>
                                                         <th style={{ padding: "16px", textAlign: "left", fontSize: "14px", fontWeight: "600", color: "var(--text-muted)" }}>Check-Out</th>
                                                         <th style={{ padding: "16px", textAlign: "left", fontSize: "14px", fontWeight: "600", color: "var(--text-muted)" }}>Status</th>
@@ -312,7 +313,8 @@ export default function SuperadminAttendancePage() {
                                                         <tr key={record.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
                                                             <td style={{ padding: "16px", fontSize: "14px", color: "var(--text)" }}>{formatDate(record.checkInTime)}</td>
                                                             <td style={{ padding: "16px", fontSize: "14px", color: "var(--text)" }}>{record.user?.name || "Unknown"}</td>
-                                                            <td style={{ padding: "16px", fontSize: "14px", color: "var(--text)" }}>{record.site?.name || "Unknown"}</td>
+                                                            <td style={{ padding: "16px", fontSize: "14px", color: "var(--text)" }}>{record.checkInSite?.name || "Unknown"}</td>
+                                                            <td style={{ padding: "16px", fontSize: "14px", color: "var(--text)", color: record.checkOutSite ? "var(--text)" : "var(--text-muted)", fontStyle: record.checkOutSite ? "normal" : "italic" }}>{record.checkOutSite?.name || "—"}</td>
                                                             <td style={{ padding: "16px", fontSize: "14px", color: "var(--text)" }}>{formatTime(record.checkInTime)}</td>
                                                             <td style={{ padding: "16px", fontSize: "14px", color: "var(--text)" }}>{formatTime(record.checkOutTime)}</td>
                                                             <td style={{ padding: "16px" }}>

@@ -25,7 +25,7 @@ export async function GET() {
                 userId: user.id,
                 checkInTime: { gte: startOfDay }
             },
-            include: { site: { select: { id: true, name: true } } },
+            include: { checkInSite: { select: { id: true, name: true } } },
             orderBy: { checkInTime: "asc" }
         });
 
@@ -41,7 +41,7 @@ export async function GET() {
 
             return {
                 id: s.id,
-                site: s.site ? { id: s.site.id, name: s.site.name } : null,
+                site: s.checkInSite ? { id: s.checkInSite.id, name: s.checkInSite.name } : null,
                 checkInTime,
                 checkOutTime,
                 status: s.status,
@@ -53,7 +53,7 @@ export async function GET() {
             // Active session might have started before today's boundary (e.g. an overnight shift)
             || await prisma.attendance.findFirst({
                 where: { userId: user.id, status: "CHECKED_IN" },
-                include: { site: { select: { id: true, name: true } } },
+                include: { checkInSite: { select: { id: true, name: true } } },
                 orderBy: { checkInTime: "desc" }
             });
 
@@ -76,7 +76,7 @@ export async function GET() {
             checkedIn: true,
             canCheckIn: false,
             canCheckout: true,
-            activeSite: activeSession.site ? { id: activeSession.site.id, name: activeSession.site.name } : null,
+            activeSite: activeSession.checkInSite ? { id: activeSession.checkInSite.id, name: activeSession.checkInSite.name } : null,
             sessions,
             totalMinutesToday,
             sessionCountToday: sessions.length

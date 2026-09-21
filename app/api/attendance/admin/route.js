@@ -33,7 +33,7 @@ export async function GET(req) {
         }
 
         if (siteId && siteId !== "all") {
-            whereClause.siteId = siteId;
+            whereClause.checkInSiteId = siteId;
         }
 
         // Filter by user role if specified
@@ -47,7 +47,10 @@ export async function GET(req) {
                 user: {
                     select: { id: true, name: true, phone: true }
                 },
-                site: {
+                checkInSite: {
+                    select: { id: true, name: true }
+                },
+                checkOutSite: {
                     select: { id: true, name: true }
                 }
             },
