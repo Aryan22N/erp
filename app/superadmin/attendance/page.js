@@ -301,7 +301,8 @@ export default function SuperadminAttendancePage() {
                                                     <tr style={{ background: "rgba(255,255,255,0.02)", borderBottom: "1px solid var(--border)" }}>
                                                         <th style={{ padding: "16px", textAlign: "left", fontSize: "14px", fontWeight: "600", color: "var(--text-muted)" }}>Date</th>
                                                         <th style={{ padding: "16px", textAlign: "left", fontSize: "14px", fontWeight: "600", color: "var(--text-muted)" }}>{filterRole === "PROJECT_MANAGER" ? "Manager" : "Supervisor"}</th>
-                                                        <th style={{ padding: "16px", textAlign: "left", fontSize: "14px", fontWeight: "600", color: "var(--text-muted)" }}>Site</th>
+                                                        <th style={{ padding: "16px", textAlign: "left", fontSize: "14px", fontWeight: "600", color: "var(--text-muted)" }}>Check-In Site</th>
+                                                        <th style={{ padding: "16px", textAlign: "left", fontSize: "14px", fontWeight: "600", color: "var(--text-muted)" }}>Check-Out Site</th>
                                                         <th style={{ padding: "16px", textAlign: "left", fontSize: "14px", fontWeight: "600", color: "var(--text-muted)" }}>Check-In</th>
                                                         <th style={{ padding: "16px", textAlign: "left", fontSize: "14px", fontWeight: "600", color: "var(--text-muted)" }}>Check-Out</th>
                                                         <th style={{ padding: "16px", textAlign: "left", fontSize: "14px", fontWeight: "600", color: "var(--text-muted)" }}>Status</th>
@@ -312,7 +313,8 @@ export default function SuperadminAttendancePage() {
                                                         <tr key={record.id} style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
                                                             <td style={{ padding: "16px", fontSize: "14px", color: "var(--text)" }}>{formatDate(record.checkInTime)}</td>
                                                             <td style={{ padding: "16px", fontSize: "14px", color: "var(--text)" }}>{record.user?.name || "Unknown"}</td>
-                                                            <td style={{ padding: "16px", fontSize: "14px", color: "var(--text)" }}>{record.site?.name || "Unknown"}</td>
+                                                            <td style={{ padding: "16px", fontSize: "14px", color: "var(--text)" }}>{record.checkInSite?.name || "Unknown"}</td>
+                                                            <td style={{ padding: "16px", fontSize: "14px", color: "var(--text)", color: record.checkOutSite ? "var(--text)" : "var(--text-muted)", fontStyle: record.checkOutSite ? "normal" : "italic" }}>{record.checkOutSite?.name || "—"}</td>
                                                             <td style={{ padding: "16px", fontSize: "14px", color: "var(--text)" }}>{formatTime(record.checkInTime)}</td>
                                                             <td style={{ padding: "16px", fontSize: "14px", color: "var(--text)" }}>{formatTime(record.checkOutTime)}</td>
                                                             <td style={{ padding: "16px" }}>
@@ -321,10 +323,20 @@ export default function SuperadminAttendancePage() {
                                                                     borderRadius: "4px",
                                                                     fontSize: "12px",
                                                                     fontWeight: "600",
-                                                                    background: record.status === "CHECKED_IN" ? "rgba(59, 130, 246, 0.1)" : "rgba(16, 185, 129, 0.1)",
-                                                                    color: record.status === "CHECKED_IN" ? "#3b82f6" : "var(--success)"
+                                                                    background: record.status === "CHECKED_IN"
+                                                                        ? "rgba(59, 130, 246, 0.1)"
+                                                                        : record.status === "AUTO_CHECKOUT"
+                                                                        ? "rgba(245, 158, 11, 0.1)"
+                                                                        : "rgba(16, 185, 129, 0.1)",
+                                                                    color: record.status === "CHECKED_IN"
+                                                                        ? "#3b82f6"
+                                                                        : record.status === "AUTO_CHECKOUT"
+                                                                        ? "#f59e0b"
+                                                                        : "var(--success)"
                                                                 }}>
-                                                                    {record.status.replace("_", " ")}
+                                                                    {record.status === "AUTO_CHECKOUT"
+                                                                        ? "AUTO CHECKOUT"
+                                                                        : record.status.replace("_", " ")}
                                                                 </span>
                                                             </td>
                                                         </tr>

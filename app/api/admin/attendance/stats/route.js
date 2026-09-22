@@ -31,7 +31,7 @@ export async function GET() {
                     lte: endOfDay
                 }
             },
-            include: { user: true, site: true }
+            include: { user: true, checkInSite: true }
         });
 
         const presentTodayIds = new Set(attendancesToday.map(a => a.userId));

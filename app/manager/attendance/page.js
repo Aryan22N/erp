@@ -33,15 +33,16 @@ export default function ManagerAttendancePage() {
                 toast.error(dataStatus.error || "Failed to load status");
             }
 
-            // Fetch Sites for Check In dropdown
-            if (!dataStatus?.checkedIn) {
-                const resSites = await fetch("/api/attendance/sites", { cache: "no-store" });
-                const dataSites = await resSites.json();
-                if (resSites.ok) {
-                    setSites(dataSites);
-                    if (dataSites.length > 0) {
-                        setSelectedSiteId(dataSites[0].id);
-                    }
+            // Always fetch sites — needed for both check-in and check-out so
+            // the user can select whichever site they are currently visiting.
+            const resSites = await fetch("/api/attendance/sites", { cache: "no-store" });
+            const dataSites = await resSites.json();
+            if (resSites.ok) {
+                setSites(dataSites);
+                // Pre-select the first site only when no selection exists yet;
+                // preserve any existing selection when refreshing after actions.
+                if (dataSites.length > 0 && !selectedSiteId) {
+                    setSelectedSiteId(dataSites[0].id);
                 }
             }
         } catch (error) {
@@ -85,8 +86,15 @@ export default function ManagerAttendancePage() {
 
     const handleAction = async (actionType) => {
         try {
-            if (actionType === "check-in" && !selectedSiteId) {
-                toast.error("Please select a project/site to check in.");
+            // Site selection is required for both check-in and check-out.
+            // On checkout the selected site is the one the user is currently at
+            // (which may differ from the check-in site).
+            if (!selectedSiteId) {
+                toast.error(
+                    actionType === "check-in"
+                        ? "Please select a site to check in."
+                        : "Please select the site you are currently at to check out."
+                );
                 return;
             }
 
@@ -98,9 +106,12 @@ export default function ManagerAttendancePage() {
             setLoading(true);
             const endpoint = actionType === "check-in" ? "/api/attendance/check-in" : "/api/attendance/check-out";
 
+            // The key name differs between the two endpoints:
+            //   check-in  → siteId         (unchanged backend contract)
+            //   check-out → checkoutSiteId  (new: lets the user check out from a different site)
             const payload = {
                 ...currentLoc,
-                ...(actionType === "check-in" ? { siteId: selectedSiteId } : {})
+                ...(actionType === "check-in" ? { siteId: selectedSiteId } : { checkoutSiteId: selectedSiteId })
             };
 
             const res = await fetch(endpoint, {
@@ -563,35 +574,36 @@ export default function ManagerAttendancePage() {
                                         </div>
                                     </div>
 
-                                    {/* ── Site Selection (when not checked in) ── */}
-                                    {!status?.checkedIn && (
-                                        <div style={{ marginBottom: "20px" }}>
-                                            <label style={{
-                                                display: "block",
-                                                fontSize: "13px",
-                                                fontWeight: "600",
-                                                color: "var(--muted-foreground)",
-                                                marginBottom: "8px",
-                                                textTransform: "uppercase",
-                                                letterSpacing: "0.06em",
-                                            }}>
-                                                Project / Site
-                                            </label>
-                                            <div className="attendance-select-wrapper">
-                                                <select
-                                                    className="attendance-select"
-                                                    value={selectedSiteId}
-                                                    onChange={(e) => { setSelectedSiteId(e.target.value); setLocationError(null); }}
-                                                    disabled={loading}
-                                                >
-                                                    {sites.length === 0 && <option value="">No active sites available</option>}
-                                                    {sites.map(site => (
-                                                        <option key={site.id} value={site.id}>{site.name}</option>
-                                                    ))}
-                                                </select>
-                                            </div>
+                                    {/* ── Site Selection (always visible) ── */}
+                                    {/* Shown for both check-in and check-out so supervisors/PMs can
+                                        record the site they are physically at right now, which may
+                                        differ from the site they checked in at earlier in the day. */}
+                                    <div style={{ marginBottom: "20px" }}>
+                                        <label style={{
+                                            display: "block",
+                                            fontSize: "13px",
+                                            fontWeight: "600",
+                                            color: "var(--muted-foreground)",
+                                            marginBottom: "8px",
+                                            textTransform: "uppercase",
+                                            letterSpacing: "0.06em",
+                                        }}>
+                                            {status?.checkedIn ? "Check-Out Site" : "Check-In Site"}
+                                        </label>
+                                        <div className="attendance-select-wrapper">
+                                            <select
+                                                className="attendance-select"
+                                                value={selectedSiteId}
+                                                onChange={(e) => { setSelectedSiteId(e.target.value); setLocationError(null); }}
+                                                disabled={loading}
+                                            >
+                                                {sites.length === 0 && <option value="">No active sites available</option>}
+                                                {sites.map(site => (
+                                                    <option key={site.id} value={site.id}>{site.name}</option>
+                                                ))}
+                                            </select>
                                         </div>
-                                    )}
+                                    </div>
                                 </>
 
                             {/* ── Location Error Banner ────────── */}
