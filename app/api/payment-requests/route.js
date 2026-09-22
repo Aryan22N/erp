@@ -1,15 +1,102 @@
 import { prisma } from "@/lib/db";
 import { getUser, hasRole } from "@/lib/auth";
 import { NextResponse } from "next/server";
+import { getISTDateKey, getISTDayBounds } from "@/lib/utils";
 
 export const dynamic = "force-dynamic"; // Rebuild after cache clear
+
+function clubRequestsByISTDay(requests, compact, isSuperAdmin = false, targetStatus = null) {
+    const clubbedMap = {};
+
+    for (const req of requests) {
+        const dateKey = getISTDateKey(req.created_at);
+        // For SuperAdmin, club all requests for the project on the same IST date into a single card
+        const clubKey = isSuperAdmin ? `${req.project_id}-${dateKey}` : `${req.project_id}-${dateKey}-${req.status}`;
+        const isReqRejected = req.status === "REJECTED";
+        const isPendingPMForAdmin = isSuperAdmin && req.status === "PENDING_PM";
+        const reqAmount = (isReqRejected || isPendingPMForAdmin) ? 0 : parseFloat(req.total_amount);
+
+        const isActionable = isSuperAdmin ? (req.status === "PENDING_ADMIN") : (req.status === "PENDING_PM");
+
+        if (!clubbedMap[clubKey]) {
+            clubbedMap[clubKey] = {
+                id: req.id,
+                isClubbed: true,
+                clubKey,
+                istDateKey: dateKey,
+                created_at: req.created_at,
+                project_id: req.project_id,
+                project: req.project,
+                status: req.status,
+                pm: req.pm || null,
+                requestIds: [req.id],
+                actionableRequestIds: isActionable ? [req.id] : [],
+                _total_amount: reqAmount,
+                _supervisor_names: [req.supervisor?.name || "Self"],
+            };
+            if (!compact) {
+                clubbedMap[clubKey]._materials = [...(req.materials || [])];
+                clubbedMap[clubKey].subRequests = [req];
+            }
+        } else {
+            const group = clubbedMap[clubKey];
+            group.requestIds.push(req.id);
+            if (isActionable) {
+                group.actionableRequestIds.push(req.id);
+            }
+            group._total_amount += reqAmount;
+            if (req.supervisor?.name && !group._supervisor_names.includes(req.supervisor.name)) {
+                group._supervisor_names.push(req.supervisor.name);
+            }
+            if (!compact) {
+                group._materials.push(...(req.materials || []));
+                group.subRequests.push(req);
+            }
+        }
+    }
+
+    let result = Object.values(clubbedMap)
+        .map((c) => {
+            const { _total_amount, _supervisor_names, _materials, ...rest } = c;
+            let primaryStatus = rest.status;
+            if (isSuperAdmin && rest.subRequests && rest.subRequests.length > 0) {
+                const statuses = [...new Set(rest.subRequests.map(s => s.status))];
+                if (statuses.length === 1) {
+                    primaryStatus = statuses[0];
+                } else if (statuses.includes("PENDING_ADMIN")) {
+                    primaryStatus = "PENDING_ADMIN";
+                } else if (statuses.includes("PENDING_PM")) {
+                    primaryStatus = "PENDING_PM";
+                } else {
+                    primaryStatus = statuses[0];
+                }
+            }
+            return {
+                ...rest,
+                status: primaryStatus,
+                total_amount: _total_amount,
+                supervisor: { name: _supervisor_names.join(", ") },
+                ...(_materials ? { materials: _materials } : {}),
+            };
+        });
+
+    if (isSuperAdmin && targetStatus && targetStatus !== "ALL") {
+        result = result.filter(group => {
+            if (!group.subRequests) return group.status === targetStatus;
+            return group.subRequests.some(s => s.status === targetStatus);
+        });
+    }
+
+    return result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+}
 
 // GET: Fetch requests based on role
 export async function GET(req) {
     try {
         const { searchParams } = new URL(req.url);
-        const limitParam = searchParams.get("limit");
-        const limit = limitParam ? parseInt(limitParam) : 2000;
+        const limitParam = searchParams.get('limit');
+        // Only enforce limit if limitParam is explicitly provided in the request
+        const limit = limitParam ? parseInt(limitParam) : null;
         const statusParam = searchParams.get('status');
         const projectParam = searchParams.get('project');
         const ownParam = searchParams.get('own');
@@ -26,7 +113,7 @@ export async function GET(req) {
                 where: { supervisor_id: user.id },
                 include: { project: true, materials: true },
                 orderBy: { created_at: "desc" },
-                take: limit
+                ...(limit ? { take: limit } : {})
             });
         } else if (hasRole(user, "PROJECT_MANAGER")) {
             if (ownParam === 'true') {
@@ -44,7 +131,7 @@ export async function GET(req) {
                         supervisor: { select: { name: true } }
                     },
                     orderBy: { created_at: "desc" },
-                    take: limit
+                    ...(limit ? { take: limit } : {})
                 });
             } else {
                 const pmWhere = {
@@ -81,105 +168,70 @@ if (projectParam) {
                         supervisor: { select: { name: true } }
                     },
                     orderBy: { created_at: "desc" },
-                    take: limit
+                    ...(limit ? { take: limit } : {})
                 });
 
-                // Project-wise clubbing for Manager
-                const clubbedMap = {};
-                for (const req of requests) {
-                    const clubKey = `${req.project_id}-${req.status}-PM_GROUP`;
-                    if (!clubbedMap[clubKey]) {
-                        clubbedMap[clubKey] = {
-                            ...req,
-                            isClubbed: true,
-                            requestIds: [req.id],
-                            _materials: [...req.materials],
-                            _total_amount: parseFloat(req.total_amount),
-                            _supervisor_names: [req.supervisor?.name || "Self"],
-                            subRequests: [req]
-                        };
-                    } else {
-                        clubbedMap[clubKey].requestIds.push(req.id);
-                        clubbedMap[clubKey]._materials.push(...req.materials);
-                        clubbedMap[clubKey]._total_amount += parseFloat(req.total_amount);
-                        if (req.supervisor?.name && !clubbedMap[clubKey]._supervisor_names.includes(req.supervisor.name)) {
-                            clubbedMap[clubKey]._supervisor_names.push(req.supervisor.name);
-                        }
-                        clubbedMap[clubKey].subRequests.push(req);
-                    }
-                }
-
-                requests = Object.values(clubbedMap).map(c => ({
-                    ...c,
-                    materials: c._materials,
-                    total_amount: c._total_amount,
-                    supervisor: { name: c._supervisor_names.join(", ") }
-                }));
-
-                requests.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                // Day-wise clubbing for Manager — uses IST-aware helper so dates
+                // are always grouped by the IST calendar day, not UTC.
+                requests = clubRequestsByISTDay(requests, false);
             }
         } else if (hasRole(user, "SUPER_ADMIN")) {
             const adminWhere = {};
-            if (statusParam && statusParam !== "ALL") {
-                adminWhere.status = statusParam;
-            } else if (!statusParam) {
-                // No status param sent → default to PENDING_ADMIN (approvals page).
-                // This prevents raw PENDING_PM requests from appearing in the
-                // superadmin approvals view before a manager has reviewed them.
-                adminWhere.status = "PENDING_ADMIN";
-            }
-            // If statusParam === "ALL" → no filter applied.
-            // The history page sends explicit status=ALL to get the full record.
             if (projectParam) adminWhere.project_id = parseInt(projectParam);
 
-            requests = await prisma.paymentRequest.findMany({
-                where: adminWhere,
-                include: { 
-                    project: true, 
-                    materials: true, 
-                    supervisor: { select: { name: true } },
-                    pm: { select: { name: true } }
-                },
-                orderBy: { created_at: "desc" },
-                take: limit
-            });
+            const activeTargetStatus = (statusParam && statusParam !== "ALL") ? statusParam : (!statusParam ? "PENDING_ADMIN" : "ALL");
 
-            // Day-wise clubbing for Super Admin
-            const clubbedMap = {};
-            
-            for (const req of requests) {
-                const dateKey = new Date(req.created_at).toLocaleDateString("en-IN");
-                const clubKey = `${req.project_id}-${dateKey}-${req.status}`;
-                
-                if (!clubbedMap[clubKey]) {
-                    clubbedMap[clubKey] = {
-                        ...req,
-                        isClubbed: true,
-                        requestIds: [req.id],
-                        _materials: [...req.materials],
-                        _total_amount: parseFloat(req.total_amount),
-                        _supervisor_names: [req.supervisor?.name || "Self"]
-                    };
+            if (activeTargetStatus !== "ALL") {
+                // Step 1: Fast indexed query to find projects & dates with matching target status
+                const targetMatches = await prisma.paymentRequest.findMany({
+                    where: {
+                        ...adminWhere,
+                        status: activeTargetStatus
+                    },
+                    select: { id: true, project_id: true, created_at: true },
+                    orderBy: { created_at: "desc" },
+                    ...(limit ? { take: limit } : { take: 100 })
+                });
+
+                if (targetMatches.length === 0) {
+                    requests = [];
                 } else {
-                    clubbedMap[clubKey].requestIds.push(req.id);
-                    clubbedMap[clubKey]._materials.push(...req.materials);
-                    clubbedMap[clubKey]._total_amount += parseFloat(req.total_amount);
-                    if (req.supervisor?.name && !clubbedMap[clubKey]._supervisor_names.includes(req.supervisor.name)) {
-                        clubbedMap[clubKey]._supervisor_names.push(req.supervisor.name);
-                    }
+                    const matchedProjectIds = [...new Set(targetMatches.map(m => m.project_id))];
+                    const minTimestamp = Math.min(...targetMatches.map(m => new Date(m.created_at).getTime())) - 86400000;
+                    const minDate = new Date(minTimestamp);
+
+                    // Step 2: Fetch full details for matched projects and dates only
+                    requests = await prisma.paymentRequest.findMany({
+                        where: {
+                            ...adminWhere,
+                            project_id: { in: matchedProjectIds },
+                            created_at: { gte: minDate }
+                        },
+                        include: { 
+                            project: true, 
+                            materials: true, 
+                            supervisor: { select: { name: true } },
+                            pm: { select: { name: true } }
+                        },
+                        orderBy: { created_at: "desc" }
+                    });
                 }
+            } else {
+                requests = await prisma.paymentRequest.findMany({
+                    where: adminWhere,
+                    include: { 
+                        project: true, 
+                        materials: true, 
+                        supervisor: { select: { name: true } },
+                        pm: { select: { name: true } }
+                    },
+                    orderBy: { created_at: "desc" },
+                    take: limit ? limit : 200
+                });
             }
-            
-            // Map back to array structure expected by frontend
-            requests = Object.values(clubbedMap).map(c => ({
-                ...c,
-                materials: c._materials,
-                total_amount: c._total_amount,
-                supervisor: { name: c._supervisor_names.join(", ") }
-            }));
-            
-            // Re-sort by date
-            requests.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+            // Day-wise clubbing for Super Admin — groups all requests on same IST date for same project
+            requests = clubRequestsByISTDay(requests, false, true, activeTargetStatus);
         }
 
         // Attach latest progress for each project (for PM and Super Admin)
@@ -191,6 +243,7 @@ if (projectParam) {
                 const allProgresses = await prisma.projectProgress.findMany({
                     where: { project_id: { in: projectIds } },
                     orderBy: { created_at: "desc" },
+                    take: projectIds.length * 10,
                     include: { user: { select: { name: true, role: true } } }
                 });
 
@@ -245,11 +298,10 @@ export async function POST(req) {
 
         const parsedProjectId = parseInt(project_id);
 
-        // Check for existing same-day PENDING_PM request for this project by this supervisor
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
-        const todayEnd = new Date();
-        todayEnd.setHours(23, 59, 59, 999);
+        // Check for existing same-day PENDING_PM request for this project by this supervisor.
+        // Use IST day bounds so that requests submitted near midnight IST are always
+        // merged against the correct IST calendar day, not the UTC calendar day.
+        const { start: todayStart, end: todayEnd } = getISTDayBounds();
 
         const isManager = hasRole(user, "PROJECT_MANAGER");
         const targetStatus = isManager ? "PENDING_ADMIN" : "PENDING_PM";

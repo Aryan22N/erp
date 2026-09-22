@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getUser } from "@/lib/auth";
+import { getISTMonthBounds, getISTDateKey } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -20,17 +21,19 @@ export async function GET(req) {
         let whereClause = {};
 
         if (month && year) {
-            const startDate = new Date(parseInt(year), parseInt(month) - 1, 1);
-            const endDate = new Date(parseInt(year), parseInt(month), 0, 23, 59, 59, 999);
+            // Use IST month bounds so records are grouped by the IST calendar
+            // month, not the UTC month. getISTMonthBounds returns UTC Date objects
+            // that correspond to IST midnight on the 1st and last day of the month.
+            const { start: startDate, end: endDate } = getISTMonthBounds(parseInt(year), parseInt(month));
             
             whereClause.checkInTime = {
                 gte: startDate,
-                lte: endDate
+                lt: endDate  // exclusive upper bound from getISTMonthBounds
             };
         }
 
         if (siteId && siteId !== "all") {
-            whereClause.siteId = siteId;
+            whereClause.checkInSiteId = siteId;
         }
 
         // Filter by user role if specified
@@ -44,7 +47,10 @@ export async function GET(req) {
                 user: {
                     select: { id: true, name: true, phone: true }
                 },
-                site: {
+                checkInSite: {
+                    select: { id: true, name: true }
+                },
+                checkOutSite: {
                     select: { id: true, name: true }
                 }
             },
@@ -76,7 +82,7 @@ export async function GET(req) {
             }
 
             const entry = summaryMap[userId];
-            const dateKey = new Date(record.checkInTime).toDateString();
+            const dateKey = getISTDateKey(record.checkInTime);
 
             entry.presentDates.add(dateKey);
             entry.sessionCount += 1;

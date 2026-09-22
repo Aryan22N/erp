@@ -63,6 +63,7 @@ model ProjectProgress {
   user_id    Int
   created_at DateTime @default(now())
 
+  @@index([project_id, created_at])
   @@map("project_progress")
 }
 
@@ -102,6 +103,10 @@ model PaymentRequest {
   created_at   DateTime      @default(now())
   updated_at   DateTime      @updatedAt
 
+  @@index([status, created_at])
+  @@index([project_id, status])
+  @@index([supervisor_id, status])
+  @@index([pm_id, status])
   @@map("payment_requests")
 }
 
@@ -184,9 +189,12 @@ model Site {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  supervisors User[]       @relation("SupervisorSite")
-  attendances Attendance[]
+  supervisors          User[]       @relation("SupervisorSite")
+  legacyAttendances    Attendance[] @relation("LegacySite")   // Phase A only — removed in Phase C
+  checkInAttendances   Attendance[] @relation("CheckInSite")
+  checkOutAttendances  Attendance[] @relation("CheckOutSite")
 
+  @@index([name])
   @@map("sites")
 }
 
@@ -201,29 +209,44 @@ model Attendance {
   id                String   @id @default(uuid()) @db.Uuid
   userId            Int
   user              User     @relation(fields: [userId], references: [id])
+
+  // ── Legacy column kept during Phase A migration window ──────────────────
+  // Will be removed in Phase C once the new columns are verified in prod.
   siteId            String   @db.Uuid
-  site              Site     @relation(fields: [siteId], references: [id])
-  
+  site              Site     @relation("LegacySite", fields: [siteId], references: [id])
+
+  // ── New split-site columns ───────────────────────────────────────────────
+  // checkInSiteId: nullable in schema so the migration can backfill before
+  // enforcing NOT NULL at the SQL level (see migration file).
+  checkInSiteId     String?  @db.Uuid
+  checkInSite       Site?    @relation("CheckInSite",  fields: [checkInSiteId],  references: [id])
+
+  // checkOutSiteId: permanently nullable — only set once checkout occurs.
+  checkOutSiteId    String?  @db.Uuid
+  checkOutSite      Site?    @relation("CheckOutSite", fields: [checkOutSiteId], references: [id])
+
   checkInTime       DateTime @default(now())
   checkOutTime      DateTime?
-  
+
   checkInLatitude   Float
   checkInLongitude  Float
   checkOutLatitude  Float?
   checkOutLongitude Float?
-  
+
   checkInAccuracy   Float
   checkOutAccuracy  Float?
-  
+
   durationMinutes   Int?
-  
+
   status            AttendanceStatus @default(CHECKED_IN)
-  
+
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
-  
+
   @@index([userId])
   @@index([siteId])
+  @@index([checkInSiteId])
+  @@index([checkOutSiteId])
   @@index([status])
   @@index([checkInTime])
   @@index([checkOutTime])

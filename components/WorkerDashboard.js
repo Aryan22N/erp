@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
+import { formatDateDDMMYYYY } from "@/lib/utils";
 
 export default function WorkerDashboard({ role }) {
     const router = useRouter();
@@ -470,7 +471,7 @@ export default function WorkerDashboard({ role }) {
                                     <div className="stat-card">
                                         <div className="stat-label">Joining Date</div>
                                         <div style={{ fontSize: "15px", fontWeight: 600, marginTop: "4px" }}>
-                                            {selectedWorker.joining_date ? new Date(selectedWorker.joining_date).toLocaleDateString() : "—"}
+                                            {selectedWorker.joining_date ? formatDateDDMMYYYY(selectedWorker.joining_date) : "—"}
                                         </div>
                                     </div>
                                     <div className="stat-card" style={{ background: "rgba(16,185,129,0.06)", border: "1px solid rgba(16,185,129,0.15)" }}>
@@ -522,7 +523,7 @@ export default function WorkerDashboard({ role }) {
                                                         <td style={{ padding: "10px 8px" }}>{m.quantity}</td>
                                                         <td style={{ padding: "10px 8px" }}>₹{parseFloat(m.unit_price).toLocaleString()}</td>
                                                         <td style={{ padding: "10px 8px", color: "var(--text-muted)", fontSize: "12px" }}>
-                                                            {m.request?.created_at ? new Date(m.request.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+                                                            {m.request?.created_at ? formatDateDDMMYYYY(m.request.created_at) : "—"}
                                                         </td>
                                                         <td style={{ padding: "10px 8px", color: "var(--text-muted)" }}>{m.request?.project?.name || "—"}</td>
                                                     </tr>

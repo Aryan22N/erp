@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getUser } from "@/lib/auth";
+import { getISTAttendanceDayStart } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -11,15 +12,11 @@ export async function GET() {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        // Day boundary at 3:00 AM, same convention the app already used, just
-        // for grouping "today's" sessions for display — it no longer blocks
-        // anything.
+        // Day boundary at 3:00 AM IST, same convention the app already used.
+        // Uses the IST-aware helper so the boundary is always at the correct
+        // absolute UTC timestamp regardless of the server's local timezone.
         const now = new Date();
-        const startOfDay = new Date(now);
-        if (startOfDay.getHours() < 3) {
-            startOfDay.setDate(startOfDay.getDate() - 1);
-        }
-        startOfDay.setHours(3, 0, 0, 0);
+        const startOfDay = getISTAttendanceDayStart();
 
         // Every check-in/check-out pair for today, oldest first. This is the
         // raw log — nothing here is a computed/stored aggregate.
@@ -28,7 +25,7 @@ export async function GET() {
                 userId: user.id,
                 checkInTime: { gte: startOfDay }
             },
-            include: { site: { select: { id: true, name: true } } },
+            include: { checkInSite: { select: { id: true, name: true } } },
             orderBy: { checkInTime: "asc" }
         });
 
@@ -44,7 +41,7 @@ export async function GET() {
 
             return {
                 id: s.id,
-                site: s.site ? { id: s.site.id, name: s.site.name } : null,
+                site: s.checkInSite ? { id: s.checkInSite.id, name: s.checkInSite.name } : null,
                 checkInTime,
                 checkOutTime,
                 status: s.status,
@@ -56,7 +53,7 @@ export async function GET() {
             // Active session might have started before today's boundary (e.g. an overnight shift)
             || await prisma.attendance.findFirst({
                 where: { userId: user.id, status: "CHECKED_IN" },
-                include: { site: { select: { id: true, name: true } } },
+                include: { checkInSite: { select: { id: true, name: true } } },
                 orderBy: { checkInTime: "desc" }
             });
 
@@ -79,7 +76,7 @@ export async function GET() {
             checkedIn: true,
             canCheckIn: false,
             canCheckout: true,
-            activeSite: activeSession.site ? { id: activeSession.site.id, name: activeSession.site.name } : null,
+            activeSite: activeSession.checkInSite ? { id: activeSession.checkInSite.id, name: activeSession.checkInSite.name } : null,
             sessions,
             totalMinutesToday,
             sessionCountToday: sessions.length
