@@ -1,6 +1,8 @@
 import { Inter } from "next/font/google";
 import "./globals.css";
 import CameraPermissionModal from "@/components/CameraPermissionModal";
+import BackButtonHandler from "@/components/HardwareBackButton";
+import HardwareBackButton from "../components/HardwareBackButton";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -26,6 +28,7 @@ export default function RootLayout({ children }) {
       <body>
         {children}
         <CameraPermissionModal />
+        <HardwareBackButton />
       </body>
     </html>
   );
