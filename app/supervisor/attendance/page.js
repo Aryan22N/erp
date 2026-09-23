@@ -153,21 +153,6 @@ export default function AttendancePage() {
         router.push("/login");
     };
 
-    // Determine the current GPS status color
-    const getGpsColor = () => {
-        if (gpsStatus === "Idle") return "var(--muted-foreground)";
-        if (gpsStatus.includes("Fetching")) return "var(--primary)";
-        if (gpsStatus.includes("Accuracy")) return "var(--success)";
-        return "var(--destructive)";
-    };
-
-    const getGpsIcon = () => {
-        if (gpsStatus === "Idle") return "📡";
-        if (gpsStatus.includes("Fetching")) return "🔄";
-        if (gpsStatus.includes("Accuracy")) return "✅";
-        return "⚠️";
-    };
-
     return (
         <div style={{ minHeight: "100vh" }} className="responsive-root">
             <div className="bg-mesh-custom" />
@@ -536,7 +521,6 @@ export default function AttendancePage() {
                                                 justifyContent: "space-between",
                                                 alignItems: "center",
                                                 padding: "14px 16px",
-                                                borderBottom: "1px solid var(--border)",
                                             }}>
                                                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                                                     <div style={{
@@ -556,48 +540,6 @@ export default function AttendancePage() {
                                                 </span>
                                             </div>
                                         )}
-
-                                        {/* GPS Row */}
-                                        <div className="attendance-status-row" style={{
-                                            display: "flex",
-                                            justifyContent: "space-between",
-                                            alignItems: "center",
-                                            padding: "14px 16px",
-                                        }}>
-                                            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                                                <div style={{
-                                                    width: "32px",
-                                                    height: "32px",
-                                                    borderRadius: "8px",
-                                                    background: gpsStatus === "Idle"
-                                                        ? "rgba(100, 116, 139, 0.1)"
-                                                        : gpsStatus.includes("Accuracy")
-                                                            ? "rgba(16, 185, 129, 0.1)"
-                                                            : "oklch(0.6996 0.2020 44.4414 / 0.1)",
-                                                    display: "flex",
-                                                    alignItems: "center",
-                                                    justifyContent: "center",
-                                                    fontSize: "15px",
-                                                }}>{getGpsIcon()}</div>
-                                                <span style={{ color: "var(--muted-foreground)", fontSize: "14px", fontWeight: "500" }}>GPS</span>
-                                            </div>
-                                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                                {gpsStatus.includes("Fetching") && (
-                                                    <div style={{
-                                                        width: "8px",
-                                                        height: "8px",
-                                                        borderRadius: "50%",
-                                                        background: "var(--primary)",
-                                                        animation: "attendancePulse 1.5s ease-in-out infinite",
-                                                    }} />
-                                                )}
-                                                <span style={{
-                                                    color: getGpsColor(),
-                                                    fontSize: "13px",
-                                                    fontWeight: "600",
-                                                }}>{gpsStatus}</span>
-                                            </div>
-                                        </div>
                                     </div>
 
                                     {/* ── Site Selection (always visible) ── */}
