@@ -14,9 +14,12 @@ function clubRequestsByISTDay(requests, compact, isSuperAdmin = false, targetSta
         const clubKey = isSuperAdmin ? `${req.project_id}-${dateKey}` : `${req.project_id}-${dateKey}-${req.status}`;
         const isReqRejected = req.status === "REJECTED";
         const isPendingPMForAdmin = isSuperAdmin && req.status === "PENDING_PM";
+        // Exclude REJECTED and PENDING_PM (not yet manager-approved) from the running total
         const reqAmount = (isReqRejected || isPendingPMForAdmin) ? 0 : parseFloat(req.total_amount);
 
-        const isActionable = isSuperAdmin ? (req.status === "PENDING_ADMIN") : (req.status === "PENDING_PM");
+        // For SA: separate actionable buckets per status
+        const isApprovable = isSuperAdmin ? (req.status === "PENDING_ADMIN") : (req.status === "PENDING_PM");
+        const isPayable = isSuperAdmin && req.status === "APPROVED";
 
         if (!clubbedMap[clubKey]) {
             clubbedMap[clubKey] = {
@@ -30,7 +33,11 @@ function clubRequestsByISTDay(requests, compact, isSuperAdmin = false, targetSta
                 status: req.status,
                 pm: req.pm || null,
                 requestIds: [req.id],
-                actionableRequestIds: isActionable ? [req.id] : [],
+                // Legacy field kept for PM compatibility (non-SA path)
+                actionableRequestIds: isApprovable ? [req.id] : [],
+                // SA-specific split buckets
+                approvableRequestIds: isApprovable ? [req.id] : [],
+                payableRequestIds: isPayable ? [req.id] : [],
                 _total_amount: reqAmount,
                 _supervisor_names: [req.supervisor?.name || "Self"],
             };
@@ -41,8 +48,12 @@ function clubRequestsByISTDay(requests, compact, isSuperAdmin = false, targetSta
         } else {
             const group = clubbedMap[clubKey];
             group.requestIds.push(req.id);
-            if (isActionable) {
+            if (isApprovable) {
                 group.actionableRequestIds.push(req.id);
+                group.approvableRequestIds.push(req.id);
+            }
+            if (isPayable) {
+                group.payableRequestIds.push(req.id);
             }
             group._total_amount += reqAmount;
             if (req.supervisor?.name && !group._supervisor_names.includes(req.supervisor.name)) {
@@ -65,6 +76,8 @@ function clubRequestsByISTDay(requests, compact, isSuperAdmin = false, targetSta
                     primaryStatus = statuses[0];
                 } else if (statuses.includes("PENDING_ADMIN")) {
                     primaryStatus = "PENDING_ADMIN";
+                } else if (statuses.includes("APPROVED")) {
+                    primaryStatus = "APPROVED";
                 } else if (statuses.includes("PENDING_PM")) {
                     primaryStatus = "PENDING_PM";
                 } else {
@@ -89,6 +102,7 @@ function clubRequestsByISTDay(requests, compact, isSuperAdmin = false, targetSta
 
     return result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 }
+
 
 // GET: Fetch requests based on role
 export async function GET(req) {

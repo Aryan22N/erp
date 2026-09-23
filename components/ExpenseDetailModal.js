@@ -11,6 +11,7 @@ export default function ExpenseDetailModal({
     role,
     onApprove,
     onReject,
+    onMarkPaid,
     actionInProgress,
     onPartialApprove
 }) {
@@ -37,7 +38,7 @@ export default function ExpenseDetailModal({
 
     const canAct =
         (role === "PROJECT_MANAGER" && request.status === "PENDING_PM") ||
-        (role === "SUPER_ADMIN" && request.status === "PENDING_ADMIN");
+        (role === "SUPER_ADMIN" && (request.status === "PENDING_ADMIN" || request.status === "APPROVED"));
 
     // Per-item buttons only for PM with 2+ materials
     const showPerItemActions = canAct && role === "PROJECT_MANAGER" && materials.length > 1 && !!onPartialApprove;
@@ -242,11 +243,11 @@ export default function ExpenseDetailModal({
                 </div>
 
                 {/* ── Footer ── */}
-                {canAct && (onApprove || onReject || onPartialApprove) && (
+                {canAct && (onApprove || onReject || onPartialApprove || onMarkPaid) && (
                     <div style={styles.actionFooter}>
                         <div style={styles.footerDivider} />
 
-                        {/* Per-item submit mode */}
+                        {/* Per-item submit mode (PM only) */}
                         {showPerItemActions ? (
                             <div style={styles.actionRow}>
                                 <span style={styles.actionLabel}>Manager Decision</span>
@@ -285,8 +286,43 @@ export default function ExpenseDetailModal({
                                     </button>
                                 </div>
                             </div>
+                        ) : role === "SUPER_ADMIN" && request.status === "APPROVED" ? (
+                            /* ── SA: APPROVED → Paid action ── */
+                            <div style={styles.actionRow}>
+                                <span style={styles.actionLabel}>Payment Action</span>
+                                <div style={styles.actionButtons}>
+                                    {onReject && (
+                                        <button
+                                            style={{
+                                                ...styles.rejectBtn,
+                                                opacity: actionInProgress ? 0.6 : 1,
+                                                cursor: actionInProgress ? "not-allowed" : "pointer"
+                                            }}
+                                            disabled={!!actionInProgress}
+                                            onClick={onReject}
+                                        >
+                                            {actionInProgress ? "Processing..." : "↩ Undo Approval"}
+                                        </button>
+                                    )}
+                                    {onMarkPaid && (
+                                        <button
+                                            style={{
+                                                ...styles.approveBtn,
+                                                background: "linear-gradient(135deg, #10b981 0%, #059669 100%)",
+                                                boxShadow: "0 4px 12px rgba(16,185,129,0.3)",
+                                                opacity: actionInProgress ? 0.6 : 1,
+                                                cursor: actionInProgress ? "not-allowed" : "pointer"
+                                            }}
+                                            disabled={!!actionInProgress}
+                                            onClick={onMarkPaid}
+                                        >
+                                            {actionInProgress ? "Processing..." : "💰 Mark as Paid"}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
                         ) : (
-                            /* Standard single-action mode */
+                            /* ── Standard: Reject + Approve (PM or SA on PENDING_ADMIN) ── */
                             <div style={styles.actionRow}>
                                 <span style={styles.actionLabel}>
                                     {role === "PROJECT_MANAGER" ? "Manager Decision" : "Admin Decision"}

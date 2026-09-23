@@ -43,7 +43,7 @@ export async function PATCH(req, { params }) {
                 const currentApprovedRequests = await prisma.paymentRequest.aggregate({
                     where: { 
                         project_id: projectId,
-                        status: { in: ["PENDING_ADMIN", "PAID"] }
+                        status: { in: ["PENDING_ADMIN", "APPROVED", "PAID"] }
                     },
                     _sum: { total_amount: true }
                 });
@@ -69,7 +69,7 @@ export async function PATCH(req, { params }) {
             if (requests.some(r => r.status !== "PENDING_ADMIN")) {
                 return NextResponse.json({ error: "One or more requests have invalid status for Admin approval" }, { status: 400 });
             }
-            nextStatus = "PAID";
+            nextStatus = "APPROVED";
 
             // Process selective image deletion if provided by Super Admin
             if (Array.isArray(deleteFileIds) && deleteFileIds.length > 0) {

@@ -85,6 +85,7 @@ model ArchivedProgress {
 enum PaymentStatus {
   PENDING_PM
   PENDING_ADMIN
+  APPROVED
   PAID
   REJECTED
 }
