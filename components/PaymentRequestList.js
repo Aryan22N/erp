@@ -204,6 +204,13 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
             if (res.ok) {
                 setLastActionTimes(prev => ({ ...prev, [actionKey]: now }));
 
+                // Read response body to detect bypass approvals
+                let responseData = {};
+                try { responseData = await res.json(); } catch (_) {}
+                const wasBypass = action === "approve" &&
+                    Array.isArray(responseData.bypassedIds) &&
+                    responseData.bypassedIds.length > 0;
+
                 // Optimistic update
                 if (isSubRequest && action === "reject") {
                     setRequests(prev => prev.map(req => {
@@ -229,10 +236,13 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
                 }
 
                 addToast(
-                    action === "approve" ? "Request Approved ✓"
+                    wasBypass ? "Direct Approval ✓"
+                        : action === "approve" ? "Request Approved ✓"
                         : action === "mark-paid" ? "Payment Marked ✓"
                         : "Request Rejected ✗",
-                    action === "approve"
+                    wasBypass
+                        ? `SA directly approved the request (manager bypassed). It now awaits payment.`
+                        : action === "approve"
                         ? `The payment request ${isClubbed ? "group" : ""} has been approved. It now awaits payment.`
                         : action === "mark-paid"
                         ? `The payment request ${isClubbed ? "group" : ""} has been marked as Paid.`
@@ -242,6 +252,7 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
 
                 // Refresh list in background
                 setTimeout(() => fetchRequests(), 1000);
+
             } else {
                 addToast("Action Failed", "Something went wrong while processing the request.", "error");
             }
@@ -711,7 +722,28 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
                                                                     >
                                                                         💰 Mark as Paid
                                                                     </button>
+                                                                ) : role === "SUPER_ADMIN" && sub.status === "PENDING_PM" ? (
+                                                                    /* SA direct approve — manager bypass */
+                                                                    <button
+                                                                        type="button"
+                                                                        style={{
+                                                                            padding: "6px 14px",
+                                                                            fontSize: "12px",
+                                                                            width: "auto",
+                                                                            background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
+                                                                            border: "none",
+                                                                            color: "#fff",
+                                                                            borderRadius: "8px",
+                                                                            cursor: "pointer",
+                                                                            fontWeight: 700,
+                                                                            boxShadow: "0 2px 8px rgba(245,158,11,0.35)"
+                                                                        }}
+                                                                        onClick={() => handleAction(sub.id, "approve", false, [], sub.project_id, req.progress?.percentage || 0, true)}
+                                                                    >
+                                                                        ⚡ Direct Approve
+                                                                    </button>
                                                                 ) : null}
+
                                                             </div>
                                                         </div>
                                                     ))}
@@ -764,45 +796,77 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
                                             </div>
 
                                             {(() => {
-                                                 // ── Approvable: PENDING_ADMIN requests (SA can approve these) ──
-                                                 const approvableIds = (req.approvableRequestIds && req.approvableRequestIds.length > 0)
-                                                     ? req.approvableRequestIds
-                                                     : (req.subRequests || [req])
-                                                         .filter(s => role === "SUPER_ADMIN" ? s.status === "PENDING_ADMIN" : s.status === "PENDING_PM")
-                                                         .map(s => s.id);
+                                                 // ── Normal approvable: PENDING_ADMIN only (SA regular approve) ──
+                                                 const normalApprovableIds = role === "SUPER_ADMIN"
+                                                     ? ((req.approvableRequestIds || []).filter(rid =>
+                                                         (req.subRequests || []).find(s => s.id === rid)?.status === "PENDING_ADMIN"
+                                                       ))
+                                                     : ((req.approvableRequestIds && req.approvableRequestIds.length > 0)
+                                                         ? req.approvableRequestIds
+                                                         : (req.subRequests || [req])
+                                                             .filter(s => s.status === "PENDING_PM")
+                                                             .map(s => s.id));
 
-                                                 // ── Payable: APPROVED requests (SA can mark these as paid) ──
+                                                 // ── Direct approvable: PENDING_PM only (SA bypass) ──
+                                                 const directApprovableIds = role === "SUPER_ADMIN"
+                                                     ? ((req.directApprovableRequestIds && req.directApprovableRequestIds.length > 0)
+                                                         ? req.directApprovableRequestIds
+                                                         : (req.subRequests || []).filter(s => s.status === "PENDING_PM").map(s => s.id))
+                                                     : [];
+
+                                                 // ── Payable: APPROVED requests (SA mark as paid) ──
                                                  const payableIds = role === "SUPER_ADMIN"
                                                      ? ((req.payableRequestIds && req.payableRequestIds.length > 0)
                                                          ? req.payableRequestIds
                                                          : (req.subRequests || []).filter(s => s.status === "APPROVED").map(s => s.id))
                                                      : [];
 
-                                                 const hasActions = approvableIds.length > 0 || payableIds.length > 0;
+                                                 const hasActions = normalApprovableIds.length > 0 || directApprovableIds.length > 0 || payableIds.length > 0;
                                                  if (!hasActions) return null;
 
                                                  return (
                                                      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
-                                                         {/* Approve / Reject group (PENDING_ADMIN) */}
-                                                         {approvableIds.length > 0 && (
+                                                         {/* Normal Approve / Reject group (PENDING_ADMIN) */}
+                                                         {normalApprovableIds.length > 0 && (
                                                              <div style={{ display: "flex", gap: "8px" }}>
                                                                  <button
                                                                      className="btn-ghost"
-                                                                     onClick={() => handleAction(reqKey, "reject", req.isClubbed, approvableIds, req.project_id, req.progress?.percentage || 0)}
+                                                                     onClick={() => handleAction(reqKey, "reject", req.isClubbed, normalApprovableIds, req.project_id, req.progress?.percentage || 0)}
                                                                      style={{ color: "#64748b", padding: "8px 16px", fontSize: "13px", border: "1px solid var(--border)" }}
                                                                      disabled={actionInProgress === reqKey}
                                                                  >
-                                                                     {actionInProgress === reqKey ? "Processing..." : approvableIds.length > 1 ? "Reject All Pending" : "Reject"}
+                                                                     {actionInProgress === reqKey ? "Processing..." : normalApprovableIds.length > 1 ? "Reject All Pending" : "Reject"}
                                                                  </button>
                                                                  <button
                                                                      className="btn-primary"
-                                                                     onClick={() => handleAction(reqKey, "approve", req.isClubbed, approvableIds, req.project_id, req.progress?.percentage || 0)}
+                                                                     onClick={() => handleAction(reqKey, "approve", req.isClubbed, normalApprovableIds, req.project_id, req.progress?.percentage || 0)}
                                                                      style={{ padding: "8px 20px", fontSize: "13px", width: "auto" }}
                                                                      disabled={actionInProgress === reqKey}
                                                                  >
-                                                                     {actionInProgress === reqKey ? "Processing..." : approvableIds.length > 1 ? "Approve All Pending" : "Approve"}
+                                                                     {actionInProgress === reqKey ? "Processing..." : normalApprovableIds.length > 1 ? "Approve All Pending" : "Approve"}
                                                                  </button>
                                                              </div>
+                                                         )}
+
+                                                         {/* Direct Approve group (PENDING_PM — SA override, amber) */}
+                                                         {directApprovableIds.length > 0 && (
+                                                             <button
+                                                                 onClick={() => handleAction(reqKey, "approve", req.isClubbed, directApprovableIds, req.project_id, req.progress?.percentage || 0)}
+                                                                 style={{
+                                                                     padding: "8px 20px",
+                                                                     fontSize: "13px",
+                                                                     border: "none",
+                                                                     borderRadius: "10px",
+                                                                     cursor: "pointer",
+                                                                     fontWeight: 700,
+                                                                     color: "#fff",
+                                                                     background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
+                                                                     boxShadow: "0 4px 12px rgba(245,158,11,0.35)"
+                                                                 }}
+                                                                 disabled={actionInProgress === reqKey}
+                                                             >
+                                                                 {actionInProgress === reqKey ? "Processing..." : `⚡ Direct Approve${directApprovableIds.length > 1 ? ` (${directApprovableIds.length})` : ""}`}
+                                                             </button>
                                                          )}
 
                                                          {/* Mark as Paid group (APPROVED) — shown separately */}
@@ -820,6 +884,7 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
                                                                  disabled={actionInProgress === reqKey}
                                                              >
                                                                  {actionInProgress === reqKey ? "Processing..." : `💰 Mark as Paid${payableIds.length > 1 ? ` (${payableIds.length})` : ""}`}
+
                                                              </button>
                                                          )}
                                                      </div>
@@ -896,6 +961,13 @@ export default function PaymentRequestList({ refreshTrigger, role, limit = null,
                         role === "SUPER_ADMIN" &&
                         selectedRequest.request?.status === "APPROVED"
                         ? () => handleModalAction(selectedRequest.request, selectedRequest.groupKey, "mark-paid", selectedRequest.progressPct)
+                        : undefined
+                }
+                onDirectApprove={
+                    selectedRequest &&
+                        role === "SUPER_ADMIN" &&
+                        selectedRequest.request?.status === "PENDING_PM"
+                        ? () => handleModalAction(selectedRequest.request, selectedRequest.groupKey, "approve", selectedRequest.progressPct)
                         : undefined
                 }
                 onPartialApprove={

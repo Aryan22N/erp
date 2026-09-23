@@ -98,6 +98,7 @@ model PaymentRequest {
   supervisor_id Int
   pm           User?         @relation("PMApprovals", fields: [pm_id], references: [id])
   pm_id        Int?
+  pm_bypassed  Boolean       @default(false)
   project      Project       @relation(fields: [project_id], references: [id])
   project_id   Int
   materials    Material[]

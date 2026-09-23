@@ -18,7 +18,12 @@ function clubRequestsByISTDay(requests, compact, isSuperAdmin = false, targetSta
         const reqAmount = (isReqRejected || isPendingPMForAdmin) ? 0 : parseFloat(req.total_amount);
 
         // For SA: separate actionable buckets per status
-        const isApprovable = isSuperAdmin ? (req.status === "PENDING_ADMIN") : (req.status === "PENDING_PM");
+        // isApprovable covers BOTH PENDING_ADMIN (normal) and PENDING_PM (SA direct bypass)
+        const isApprovable = isSuperAdmin
+            ? (req.status === "PENDING_ADMIN" || req.status === "PENDING_PM")
+            : (req.status === "PENDING_PM");
+        // Subset of isApprovable: only PENDING_PM (SA acting in Manager capacity)
+        const isDirectApprovable = isSuperAdmin && req.status === "PENDING_PM";
         const isPayable = isSuperAdmin && req.status === "APPROVED";
 
         if (!clubbedMap[clubKey]) {
@@ -37,6 +42,7 @@ function clubRequestsByISTDay(requests, compact, isSuperAdmin = false, targetSta
                 actionableRequestIds: isApprovable ? [req.id] : [],
                 // SA-specific split buckets
                 approvableRequestIds: isApprovable ? [req.id] : [],
+                directApprovableRequestIds: isDirectApprovable ? [req.id] : [],
                 payableRequestIds: isPayable ? [req.id] : [],
                 _total_amount: reqAmount,
                 _supervisor_names: [req.supervisor?.name || "Self"],
@@ -51,6 +57,9 @@ function clubRequestsByISTDay(requests, compact, isSuperAdmin = false, targetSta
             if (isApprovable) {
                 group.actionableRequestIds.push(req.id);
                 group.approvableRequestIds.push(req.id);
+            }
+            if (isDirectApprovable) {
+                group.directApprovableRequestIds.push(req.id);
             }
             if (isPayable) {
                 group.payableRequestIds.push(req.id);

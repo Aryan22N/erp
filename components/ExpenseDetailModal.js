@@ -12,6 +12,7 @@ export default function ExpenseDetailModal({
     onApprove,
     onReject,
     onMarkPaid,
+    onDirectApprove,
     actionInProgress,
     onPartialApprove
 }) {
@@ -38,7 +39,11 @@ export default function ExpenseDetailModal({
 
     const canAct =
         (role === "PROJECT_MANAGER" && request.status === "PENDING_PM") ||
-        (role === "SUPER_ADMIN" && (request.status === "PENDING_ADMIN" || request.status === "APPROVED"));
+        (role === "SUPER_ADMIN" && (
+            request.status === "PENDING_ADMIN" ||
+            request.status === "APPROVED" ||
+            request.status === "PENDING_PM"   // SA direct approve (bypass)
+        ));
 
     // Per-item buttons only for PM with 2+ materials
     const showPerItemActions = canAct && role === "PROJECT_MANAGER" && materials.length > 1 && !!onPartialApprove;
@@ -317,6 +322,33 @@ export default function ExpenseDetailModal({
                                             onClick={onMarkPaid}
                                         >
                                             {actionInProgress ? "Processing..." : "💰 Mark as Paid"}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        ) : role === "SUPER_ADMIN" && request.status === "PENDING_PM" ? (
+                            /* ── SA: Direct Approve (bypass Manager) ── */
+                            <div style={styles.actionRow}>
+                                <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                    <span style={styles.actionLabel}>Admin Override</span>
+                                    <span style={{ fontSize: "11px", color: "#d97706", fontWeight: 600 }}>
+                                        ⚠️ Manager has not reviewed this request
+                                    </span>
+                                </div>
+                                <div style={styles.actionButtons}>
+                                    {onDirectApprove && (
+                                        <button
+                                            style={{
+                                                ...styles.approveBtn,
+                                                background: "linear-gradient(135deg, #f59e0b 0%, #d97706 100%)",
+                                                boxShadow: "0 4px 12px rgba(245,158,11,0.3)",
+                                                opacity: actionInProgress ? 0.6 : 1,
+                                                cursor: actionInProgress ? "not-allowed" : "pointer"
+                                            }}
+                                            disabled={!!actionInProgress}
+                                            onClick={onDirectApprove}
+                                        >
+                                            {actionInProgress ? "Processing..." : "⚡ Direct Approve"}
                                         </button>
                                     )}
                                 </div>
