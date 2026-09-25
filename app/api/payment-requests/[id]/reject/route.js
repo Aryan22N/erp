@@ -36,8 +36,8 @@ export async function PATCH(req, { params }) {
                 return NextResponse.json({ error: "Managers can only reject PENDING_PM requests" }, { status: 400 });
             }
         } else if (hasRole(user, "SUPER_ADMIN")) {
-            if (requests.some(r => r.status !== "PENDING_ADMIN")) {
-                return NextResponse.json({ error: "Admins can only reject PENDING_ADMIN requests" }, { status: 400 });
+            if (requests.some(r => r.status !== "PENDING_ADMIN" && r.status !== "APPROVED")) {
+                return NextResponse.json({ error: "Admins can only reject PENDING_ADMIN or APPROVED requests" }, { status: 400 });
             }
         }
 
